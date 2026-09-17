@@ -1,0 +1,1484 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>은행 지점 지도</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        html, body { width: 100%; height: 100%; font-family: 'Pretendard', -apple-system, sans-serif; overflow: hidden; }
+
+        /* ===== 지도 영역 ===== */
+        #map, #kakao-map {
+            position: absolute; top: 0; right: 0; bottom: 0;
+            left: 320px; width: calc(100% - 320px);
+        }
+        #kakao-map { z-index: 0; }
+        #map { z-index: 1; background: transparent; }
+
+        /* ===== 사이드 패널 ===== */
+        #side-panel {
+            position: fixed; top: 0; left: 0; width: 320px; height: 100%;
+            background: #fff; z-index: 3000; display: flex; flex-direction: column;
+            box-shadow: 2px 0 12px rgba(0,0,0,0.08);
+        }
+        .panel-header { padding: 18px 20px; background: linear-gradient(135deg, #1a365d, #2b6cb0); color: white; }
+        .panel-header h1 { font-size: 17px; font-weight: 700; margin-bottom: 3px; }
+        .panel-header .subtitle { font-size: 11px; opacity: 0.85; }
+        .panel-count { font-size: 13px; margin-top: 8px; font-weight: 600; }
+        .panel-count span { color: #fbd38d; }
+        .sync-status { font-size: 10px; margin-top: 4px; opacity: 0.85; }
+        .sync-status.ok { color: #9ae6b4; }
+        .sync-status.err { color: #feb2b2; }
+        .sync-status.pending { color: #fbd38d; }
+
+        .filter-section { padding: 12px 16px; border-bottom: 1px solid #edf2f7; }
+        .filter-section label { font-size: 11px; font-weight: 600; color: #718096; display: block; margin-bottom: 6px; }
+        .filter-row { display: flex; flex-wrap: wrap; gap: 4px; }
+        .chip {
+            padding: 4px 10px; border-radius: 20px; font-size: 11px; font-weight: 600;
+            cursor: pointer; border: 1.5px solid #e2e8f0; background: white;
+            transition: all 0.15s; user-select: none;
+        }
+        .chip.active { color: white; border-color: transparent; }
+        .chip:hover { transform: scale(1.04); }
+        .search-input {
+            width: 100%; padding: 8px 12px; border: 1.5px solid #e2e8f0; border-radius: 8px;
+            font-size: 12px; outline: none; margin-top: 8px; font-family: inherit;
+        }
+        .search-input:focus { border-color: #2b6cb0; }
+        .edit-backup {
+            display: flex; align-items: center; gap: 6px; margin-top: 8px; flex-wrap: wrap;
+        }
+        .edit-backup-lbl { font-size: 10px; color: #a0aec0; font-weight: 600; flex: 1; }
+        .edit-backup-lbl span { cursor: help; color: #cbd5e0; }
+        .edit-backup button {
+            font-size: 10px; font-weight: 600; color: #4a5568;
+            background: white; border: 1px solid #e2e8f0; border-radius: 6px;
+            padding: 3px 8px; cursor: pointer;
+        }
+        .edit-backup button:hover { background: #f0f7ff; border-color: #2b6cb0; color: #2b6cb0; }
+
+        /* IBK 섹션 강조 */
+        .ibk-section {
+            background: linear-gradient(180deg, #fafbff, #fff);
+            border-left: 3px solid #0051af;
+            padding: 12px 16px;
+            border-bottom: 1px solid #edf2f7;
+        }
+        .ibk-section .ibk-title {
+            font-size: 11px; font-weight: 700; color: #0051af;
+            text-transform: uppercase; letter-spacing: 0.5px; margin-bottom: 8px;
+        }
+        .ibk-section label { font-size: 10px; font-weight: 600; color: #718096; display: block; margin-bottom: 4px; margin-top: 8px; }
+        .ibk-section label:first-of-type { margin-top: 0; }
+
+        #list-container { flex: 1; overflow-y: auto; }
+        .list-item { padding: 11px 16px; border-bottom: 1px solid #f7fafc; cursor: pointer; transition: background 0.15s; }
+        .list-item:hover { background: #f0f7ff; }
+        .list-item .bank-badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; color: white; margin-bottom: 4px; }
+        .list-item .name { font-size: 14px; font-weight: 700; color: #2d3748; }
+        .list-item .meta { font-size: 11px; color: #718096; margin-top: 3px; }
+        .list-item .ibk-info { font-size: 11px; color: #0051af; margin-top: 2px; font-weight: 600; }
+        .list-item .note-preview { font-size: 11px; color: #d97706; margin-top: 3px; padding: 2px 6px; background: #fef3c7; border-radius: 3px; display: inline-block; }
+        .empty-state { padding: 40px 20px; text-align: center; color: #a0aec0; font-size: 13px; }
+
+        /* ===== 히트맵 — 우측 상단 플로팅 패널 ===== */
+        #heat-floating {
+            position: absolute;
+            top: 70px; right: 10px;
+            width: 320px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+            z-index: 1000;
+            display: none;
+            overflow: hidden;
+        }
+        #heat-floating.visible { display: block; }
+        #heat-floating .heat-header {
+            padding: 10px 14px;
+            background: linear-gradient(135deg, #d97706, #f59e0b);
+            color: white;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 13px; font-weight: 700;
+        }
+        #heat-floating .heat-header .heat-close {
+            background: transparent; border: none; color: white;
+            font-size: 18px; cursor: pointer; padding: 0 6px; line-height: 1;
+        }
+        #heat-floating .heat-body { padding: 12px; max-height: 480px; overflow-y: auto; }
+        .heat-section { margin-bottom: 12px; }
+        .heat-section label {
+            display: block; font-size: 11px; font-weight: 600; color: #718096;
+            margin-bottom: 6px;
+        }
+        .heat-section .heat-search {
+            width: 100%; padding: 6px 10px; border: 1.5px solid #e2e8f0;
+            border-radius: 6px; font-size: 12px; outline: none;
+            font-family: inherit; margin-bottom: 6px;
+        }
+        .heat-section .heat-search:focus { border-color: #d97706; }
+        .heat-chips { display: flex; flex-wrap: wrap; gap: 4px; }
+        .heat-chip {
+            padding: 3px 9px; border-radius: 14px; font-size: 11px; font-weight: 600;
+            cursor: pointer; border: 1.5px solid #e2e8f0; background: white;
+            color: #4a5568; transition: all 0.15s; user-select: none;
+        }
+        .heat-chip:hover { border-color: #d97706; }
+        .heat-chip.active {
+            background: #d97706; color: white; border-color: #d97706;
+        }
+        .heat-chip .cnt {
+            font-size: 10px; opacity: 0.85; margin-left: 3px;
+        }
+        .heat-stats {
+            font-size: 11px; color: #4a5568; padding: 8px 10px;
+            background: #fef3c7; border-radius: 6px;
+            border-left: 3px solid #f59e0b;
+        }
+        .heat-stats b { color: #92400e; }
+        .heat-legend {
+            display: flex; align-items: center; gap: 6px; font-size: 10px;
+            color: #718096; margin-top: 8px;
+        }
+        .heat-legend .gradient {
+            flex: 1; height: 8px; border-radius: 4px;
+            background: linear-gradient(to right,
+                rgba(0,0,255,0.0) 0%,
+                rgba(0,200,255,0.6) 25%,
+                rgba(0,255,100,0.7) 50%,
+                rgba(255,200,0,0.8) 75%,
+                rgba(255,0,0,0.9) 100%);
+        }
+
+        @media (max-width: 768px) {
+            #heat-floating {
+                top: 60px; right: 10px; left: 10px;
+                width: auto; max-width: none;
+            }
+            #heat-floating .heat-body { max-height: 60vh; }
+        }
+
+        /* ===== 자료실 — 우측 상단 플로팅 패널 ===== */
+        #docs-floating {
+            position: absolute;
+            top: 70px; right: 10px;
+            width: 280px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+            z-index: 1000;
+            display: none;
+            overflow: hidden;
+        }
+        #docs-floating.visible { display: block; }
+        #docs-floating .docs-header {
+            padding: 10px 14px;
+            background: linear-gradient(135deg, #1a365d, #2b6cb0);
+            color: white;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 13px; font-weight: 700;
+        }
+        #docs-floating .docs-header .docs-close {
+            background: transparent; border: none; color: white;
+            font-size: 18px; cursor: pointer; padding: 0 6px; line-height: 1;
+        }
+        #docs-floating .docs-body { padding: 8px 6px 12px; max-height: 480px; overflow-y: auto; }
+
+        .docs-tree { list-style: none; padding: 0; margin: 0; font-size: 13px; }
+        .docs-tree .docs-folder, .docs-tree .docs-file {
+            padding: 7px 10px; cursor: pointer; user-select: none;
+            border-radius: 6px; display: flex; align-items: center; gap: 6px;
+            color: #2d3748; transition: background 0.15s;
+        }
+        .docs-tree .docs-folder:hover, .docs-tree .docs-file:hover {
+            background: #f0f7ff;
+        }
+        .docs-tree .docs-folder { font-weight: 700; }
+        .docs-tree .docs-folder .arrow {
+            font-size: 10px; color: #a0aec0; transition: transform 0.2s;
+            display: inline-block; width: 10px;
+        }
+        .docs-tree .docs-folder.open .arrow { transform: rotate(90deg); }
+        .docs-tree .docs-children {
+            list-style: none; padding-left: 22px; margin: 2px 0; display: none;
+        }
+        .docs-tree .docs-folder.open + .docs-children { display: block; }
+        .docs-tree .docs-file {
+            color: #4a5568; padding: 6px 10px;
+        }
+        .docs-tree .docs-file::before { content: '📄'; flex-shrink: 0; }
+        .docs-tree .docs-file .file-name { flex: 1; }
+        .docs-tree .docs-file:hover { color: #0051af; }
+
+        /* 모바일에서는 화면 거의 전체 차지 */
+        @media (max-width: 768px) {
+            #docs-floating {
+                top: 60px; right: 10px; left: 10px;
+                width: auto; max-width: none;
+            }
+            #docs-floating .docs-body { max-height: 60vh; }
+        }
+
+        /* ===== 케이스 스터디 — 우측 상단 플로팅 패널 ===== */
+        #case-floating {
+            position: absolute;
+            top: 70px; right: 10px;
+            width: 420px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+            z-index: 1000;
+            display: none;
+            overflow: hidden;
+        }
+        #case-floating.visible { display: block; }
+        #case-floating .case-header {
+            padding: 10px 14px;
+            background: linear-gradient(135deg, #1a365d, #2b6cb0);
+            color: white;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 13px; font-weight: 700;
+        }
+        #case-floating .case-header .case-close {
+            background: transparent; border: none; color: white;
+            font-size: 18px; cursor: pointer; padding: 0 6px; line-height: 1;
+        }
+        #case-floating .case-body { padding: 12px; max-height: 560px; overflow-y: auto; }
+
+        .case-form {
+            padding: 12px; background: #f7fafc; border-radius: 8px;
+            border: 1px solid #edf2f7; margin-bottom: 12px;
+        }
+        .case-form.editing { background: #fff8e1; border-color: #fbbf24; }
+        .case-form-title {
+            font-size: 11px; font-weight: 700; color: #718096;
+            margin-bottom: 8px; letter-spacing: 0.5px; text-transform: uppercase;
+        }
+        .case-row {
+            display: grid; grid-template-columns: 1fr 2fr;
+            gap: 8px; margin-bottom: 8px;
+        }
+        .case-field label {
+            display: block; font-size: 10px; font-weight: 600;
+            color: #718096; margin-bottom: 3px;
+        }
+        .case-field input, .case-field textarea {
+            width: 100%; padding: 6px 8px;
+            border: 1px solid #cbd5e0; border-radius: 5px;
+            font-size: 12px; font-family: inherit; outline: none;
+            box-sizing: border-box;
+        }
+        .case-field input:focus, .case-field textarea:focus { border-color: #0051af; }
+        .case-field.full { grid-column: 1 / -1; }
+        .case-field textarea { resize: vertical; min-height: 70px; }
+        .case-form-actions { display: flex; justify-content: flex-end; gap: 6px; }
+        .case-save-btn {
+            background: #0051af; color: white; border: none; border-radius: 5px;
+            padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer;
+        }
+        .case-save-btn:hover { background: #003D7A; }
+        .case-save-btn:disabled { background: #cbd5e0; cursor: not-allowed; }
+        .case-cancel-btn {
+            background: #edf2f7; color: #4a5568; border: none; border-radius: 5px;
+            padding: 6px 14px; font-size: 12px; font-weight: 700; cursor: pointer;
+        }
+        .case-cancel-btn:hover { background: #e2e8f0; }
+
+        .case-list-title {
+            font-size: 11px; font-weight: 700; color: #718096;
+            margin: 12px 4px 6px;
+            display: flex; justify-content: space-between; align-items: center;
+            text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .case-count { color: #0051af; font-weight: 800; }
+
+        .case-card {
+            background: white; border: 1px solid #edf2f7;
+            border-radius: 8px; padding: 10px 12px; margin-bottom: 8px;
+            transition: box-shadow 0.15s;
+        }
+        .case-card:hover { box-shadow: 0 2px 8px rgba(0,0,0,0.06); }
+        .case-card.editing { border-color: #fbbf24; background: #fffbeb; }
+        .case-card-head {
+            display: flex; align-items: center; gap: 8px;
+            font-size: 12px; margin-bottom: 6px; flex-wrap: wrap;
+        }
+        .case-author-chip {
+            background: #0051af; color: white; padding: 2px 8px;
+            border-radius: 10px; font-size: 11px; font-weight: 700; flex-shrink: 0;
+        }
+        .case-topic {
+            font-weight: 700; color: #2d3748; flex: 1;
+            word-break: break-word; min-width: 100px;
+        }
+        .case-date { font-size: 10px; color: #a0aec0; }
+        .case-content {
+            font-size: 12px; color: #4a5568; line-height: 1.6;
+            word-break: break-word; white-space: pre-wrap;
+        }
+        .case-card-actions {
+            margin-top: 8px; padding-top: 6px; border-top: 1px solid #f7fafc;
+            display: flex; gap: 6px; justify-content: flex-end;
+        }
+        .case-card-actions button {
+            background: transparent; border: none; color: #718096;
+            font-size: 11px; cursor: pointer; padding: 3px 10px; border-radius: 4px;
+            font-weight: 600;
+        }
+        .case-card-actions button:hover { background: #edf2f7; color: #2d3748; }
+        .case-card-actions .case-del { color: #dc2626; }
+        .case-card-actions .case-del:hover { background: #fee2e2; color: #dc2626; }
+
+        .case-empty {
+            text-align: center; color: #a0aec0; padding: 20px;
+            font-size: 12px; font-style: italic;
+        }
+
+        /* 모바일 */
+        @media (max-width: 768px) {
+            #case-floating {
+                top: 60px; right: 10px; left: 10px;
+                width: auto; max-width: none;
+            }
+            #case-floating .case-body { max-height: 60vh; }
+        }
+
+        /* ===== 팀 캘린더 — 우측 상단 플로팅 패널 ===== */
+        #cal-floating {
+            position: absolute;
+            top: 70px;          /* 라벨 토글 컨트롤 아래 */
+            right: 10px;
+            width: 380px;
+            background: white;
+            border-radius: 10px;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.18);
+            z-index: 1000;
+            display: none;
+            overflow: hidden;
+        }
+        #cal-floating.visible { display: block; }
+        #cal-floating .cal-header {
+            padding: 10px 14px;
+            background: linear-gradient(135deg, #1a365d, #2b6cb0);
+            color: white;
+            display: flex; justify-content: space-between; align-items: center;
+            font-size: 13px; font-weight: 700;
+        }
+        #cal-floating .cal-header .cal-close {
+            background: transparent; border: none; color: white;
+            font-size: 18px; cursor: pointer; padding: 0 6px; line-height: 1;
+        }
+        #cal-floating .cal-body { padding: 12px; max-height: 480px; overflow-y: auto; }
+        .cal-nav {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 8px; font-size: 13px; font-weight: 700; color: #2d3748;
+        }
+        .cal-nav button {
+            border: 1px solid #cbd5e0; background: white; cursor: pointer;
+            border-radius: 6px; padding: 3px 10px; font-size: 14px; color: #4a5568;
+        }
+        .cal-nav button:hover { background: #f0f7ff; }
+        .cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 2px; }
+        .cal-grid .dow {
+            text-align: center; font-size: 10px; font-weight: 700;
+            color: #a0aec0; padding: 4px 0;
+        }
+        .cal-grid .dow.sun { color: #e53e3e; }
+        .cal-grid .dow.sat { color: #2b6cb0; }
+        .cal-day {
+            min-height: 44px; padding: 3px 2px 4px;
+            display: flex; flex-direction: column; align-items: center;
+            justify-content: flex-start; font-size: 11px; cursor: pointer;
+            border-radius: 4px; position: relative; color: #2d3748;
+            transition: background 0.15s;
+        }
+        .cal-day:hover { background: #e6f0ff; }
+        .cal-day.other { color: #cbd5e0; }
+        .cal-day.today { font-weight: 800; color: #2b6cb0; }
+        .cal-day.today::before {
+            content: ''; position: absolute; inset: 1px;
+            border: 1.5px solid #2b6cb0; border-radius: 4px; pointer-events: none;
+        }
+        .cal-day.selected { background: #2b6cb0; color: white !important; font-weight: 700; }
+        .cal-day.selected::before { border-color: transparent; }
+        .cal-day.sun { color: #e53e3e; }
+        .cal-day.sat { color: #2b6cb0; }
+        .cal-day .name-chips {
+            display: flex; flex-direction: column; gap: 1px; margin-top: 2px;
+            width: 100%; align-items: stretch;
+        }
+        .cal-day .name-chip {
+            font-size: 9px; font-weight: 700; color: white;
+            padding: 1px 3px; border-radius: 3px;
+            text-align: center; line-height: 1.25;
+            white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+        }
+        .cal-day .name-chip.more {
+            background: #cbd5e0 !important; color: #4a5568 !important;
+        }
+        .cal-day.selected .name-chip { box-shadow: 0 0 0 1px white; }
+        .cal-events { margin-top: 10px; padding-top: 10px; border-top: 1px solid #edf2f7; }
+        .cal-events h4 {
+            font-size: 11px; font-weight: 700; color: #4a5568; margin-bottom: 6px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .cal-events h4 .add-btn {
+            background: #0051af; color: white; border: none; border-radius: 4px;
+            padding: 2px 8px; font-size: 11px; font-weight: 700; cursor: pointer;
+        }
+        .cal-events h4 .add-btn:hover { background: #003D7A; }
+        .cal-event-item {
+            display: flex; align-items: flex-start; gap: 6px;
+            padding: 6px 8px; margin-bottom: 4px;
+            background: white; border: 1px solid #edf2f7; border-radius: 6px;
+            cursor: pointer; transition: background 0.15s;
+        }
+        .cal-event-item:hover { background: #f0f7ff; }
+        .cal-event-item .ev-color {
+            width: 4px; flex-shrink: 0; align-self: stretch; border-radius: 2px;
+            margin-top: 2px; margin-bottom: 2px;
+        }
+        .cal-event-item .ev-content { flex: 1; min-width: 0; }
+        .cal-event-item .ev-time { font-size: 10px; color: #718096; font-weight: 600; }
+        .cal-event-item .ev-title { font-size: 12px; font-weight: 700; color: #2d3748; word-break: break-word; }
+        .cal-event-item .ev-meta { font-size: 10px; color: #718096; margin-top: 1px; word-break: break-word; }
+        .cal-events-empty {
+            text-align: center; color: #a0aec0; font-size: 11px; padding: 12px;
+            font-style: italic;
+        }
+
+        /* ===== 담당자별 일정 누적 통계 ===== */
+        .cal-member-stats {
+            margin-bottom: 10px; padding: 8px 10px;
+            background: #f7fafc; border-radius: 6px;
+            border-left: 3px solid #2b6cb0;
+        }
+        .cal-member-stats .stats-label {
+            font-size: 10px; color: #4a5568; font-weight: 700;
+            margin-bottom: 6px; display: flex; align-items: center; gap: 6px;
+        }
+        .cal-member-stats .stats-total {
+            color: #a0aec0; font-weight: 600;
+        }
+        .cal-member-stats .stats-chips {
+            display: flex; flex-wrap: wrap; gap: 4px;
+        }
+        .cal-member-stats .stats-loading {
+            font-size: 11px; color: #a0aec0; font-style: italic;
+        }
+        .member-stat-chip {
+            display: inline-flex; align-items: center; gap: 4px;
+            padding: 2px 4px 2px 8px; border-radius: 11px;
+            font-size: 11px; font-weight: 700; color: white;
+            line-height: 1.4;
+        }
+        .member-stat-chip .stat-count {
+            background: rgba(255,255,255,0.28);
+            border-radius: 9px; padding: 0 6px;
+            font-size: 10px; min-width: 14px; text-align: center;
+        }
+        .member-stat-chip.unassigned { background: #a0aec0; }
+        .member-stat-chip.zero { opacity: 0.4; }
+
+        /* ===== 월 요약 표 ===== */
+        .cal-summary {
+            margin-top: 12px; padding-top: 10px; border-top: 1px solid #edf2f7;
+        }
+        .cal-summary h4 {
+            font-size: 11px; font-weight: 700; color: #4a5568; margin-bottom: 6px;
+            display: flex; justify-content: space-between; align-items: center;
+        }
+        .cal-summary-table {
+            width: 100%; border-collapse: collapse; font-size: 11px;
+        }
+        .cal-summary-table th, .cal-summary-table td {
+            padding: 4px 5px; border-bottom: 1px solid #edf2f7; text-align: left;
+            vertical-align: top;
+        }
+        .cal-summary-table th {
+            background: #f7fafc; color: #718096; font-weight: 600;
+            font-size: 10px; position: sticky; top: 0;
+        }
+        .cal-summary-table tr { cursor: pointer; transition: background 0.15s; }
+        .cal-summary-table tr:hover { background: #f0f7ff; }
+        .cal-summary-table .sum-date {
+            white-space: nowrap; font-weight: 600; color: #2d3748;
+        }
+        .cal-summary-table .sum-date.sun { color: #e53e3e; }
+        .cal-summary-table .sum-date.sat { color: #2b6cb0; }
+        .cal-summary-table .sum-time {
+            white-space: nowrap; color: #718096; font-size: 10px;
+        }
+        .cal-summary-table .sum-member {
+            white-space: nowrap;
+        }
+        .cal-summary-table .sum-member-chip {
+            display: inline-block; padding: 1px 5px; border-radius: 3px;
+            color: white; font-size: 10px; font-weight: 700;
+        }
+        .cal-summary-table .sum-title {
+            font-weight: 600; color: #2d3748; word-break: break-word;
+        }
+        .cal-summary-empty {
+            text-align: center; color: #a0aec0; padding: 16px;
+            font-size: 11px; font-style: italic;
+        }
+
+        /* 모바일에서는 화면 거의 전체 차지 */
+        @media (max-width: 768px) {
+            #cal-floating {
+                top: 60px;
+                right: 10px;
+                left: 10px;
+                width: auto;
+                max-width: none;
+            }
+            #cal-floating .cal-body { max-height: 60vh; }
+        }
+
+        /* ===== 일정 모달 ===== */
+        .cal-modal-overlay {
+            display: none; position: fixed; inset: 0;
+            background: rgba(0,0,0,0.5); z-index: 5000;
+            align-items: center; justify-content: center;
+        }
+        .cal-modal-overlay.visible { display: flex; }
+        .cal-modal {
+            background: white; border-radius: 12px; padding: 20px;
+            width: 90%; max-width: 380px; max-height: 90vh; overflow-y: auto;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+        }
+        .cal-modal h3 {
+            font-size: 16px; font-weight: 700; color: #1a202c;
+            margin-bottom: 14px;
+        }
+        .cal-modal .field { margin-bottom: 10px; }
+        .cal-modal label {
+            display: block; font-size: 11px; font-weight: 600;
+            color: #718096; margin-bottom: 4px;
+        }
+        .cal-modal input[type="text"],
+        .cal-modal input[type="date"],
+        .cal-modal input[type="time"],
+        .cal-modal select,
+        .cal-modal textarea {
+            width: 100%; padding: 7px 10px; border: 1.5px solid #e2e8f0;
+            border-radius: 6px; font-size: 13px; outline: none; font-family: inherit;
+        }
+        .cal-modal input:focus, .cal-modal select:focus, .cal-modal textarea:focus { border-color: #0051af; }
+        .cal-modal textarea { resize: vertical; min-height: 60px; }
+        .cal-modal .row2 { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+        .cal-modal .checkbox-row { display: flex; align-items: center; gap: 6px; font-size: 12px; }
+        .cal-modal .checkbox-row input { width: 16px; height: 16px; }
+        .cal-modal-actions {
+            display: flex; gap: 8px; margin-top: 14px; padding-top: 12px;
+            border-top: 1px solid #edf2f7;
+        }
+        .cal-modal-actions button {
+            flex: 1; padding: 8px; border: none; border-radius: 6px;
+            font-size: 13px; font-weight: 700; cursor: pointer;
+        }
+        .cal-modal-actions .btn-save { background: #0051af; color: white; }
+        .cal-modal-actions .btn-save:hover { background: #003D7A; }
+        .cal-modal-actions .btn-save:disabled { background: #cbd5e0; cursor: not-allowed; }
+        .cal-modal-actions .btn-delete { background: #fee2e2; color: #dc2626; }
+        .cal-modal-actions .btn-delete:hover { background: #fecaca; }
+        .cal-modal-actions .btn-cancel { background: #edf2f7; color: #4a5568; }
+        .cal-modal-actions .btn-cancel:hover { background: #e2e8f0; }
+
+        /* ===== 팝업 (공통) ===== */
+        .leaflet-popup-content-wrapper {
+            border-radius: 10px !important; border: none !important;
+            box-shadow: 0 6px 24px rgba(0,0,0,0.15) !important;
+        }
+        .leaflet-popup-content { margin: 0 !important; width: 280px !important; }
+        .popup-inner { padding: 14px 16px; }
+        .popup-inner .bank-tag { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 10px; font-weight: 700; color: white; margin-bottom: 6px; }
+        .popup-inner .branch-name { font-size: 16px; font-weight: 800; color: #1a202c; margin-bottom: 8px; }
+        .popup-inner .info-row { font-size: 12px; color: #4a5568; margin-bottom: 4px; }
+        .popup-inner .info-row b { color: #2d3748; min-width: 60px; display: inline-block; font-weight: 600; }
+
+        /* IBK 풀 팝업 전용 */
+        .leaflet-popup-content.ibk-popup-wrap { width: 320px !important; }
+        .popup-section { margin-top: 10px; padding-top: 10px; border-top: 1px solid #edf2f7; }
+        .popup-section h3 {
+            font-size: 11px; font-weight: 700; color: #0051af;
+            margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.5px;
+        }
+        .history-table { width: 100%; font-size: 11px; border-collapse: collapse; margin-top: 4px; }
+        .history-table th, .history-table td { padding: 4px 5px; border-bottom: 1px solid #edf2f7; text-align: left; vertical-align: middle; }
+        .history-table th { background: #f7fafc; color: #718096; font-weight: 600; font-size: 10px; }
+        .history-table td.col-note { padding: 2px 4px; }
+        .history-table .row-note-input {
+            width: 100%; padding: 3px 6px; border: 1px solid transparent; border-radius: 4px;
+            font-size: 11px; outline: none; font-family: inherit; background: transparent;
+            transition: border-color 0.15s, background 0.15s;
+        }
+        .history-table .row-note-input:hover { border-color: #cbd5e0; background: #fafbff; }
+        .history-table .row-note-input:focus { border-color: #0051af; background: #fff; }
+        .history-table .row-note-input.saving { background: #fffbeb; border-color: #f59e0b; }
+        .history-table .row-note-input.saved { background: #d1fae5; border-color: #10b981; }
+        .history-table .row-note-input.err { background: #fee2e2; border-color: #ef4444; }
+        .history-empty { font-size: 11px; color: #a0aec0; font-style: italic; }
+        .history-hint { font-size: 10px; color: #a0aec0; margin-top: 4px; font-style: italic; }
+
+        .note-edit { display: flex; gap: 6px; margin-top: 4px; }
+        .note-edit textarea {
+            flex: 1; padding: 6px 8px; border: 1.5px solid #e2e8f0; border-radius: 6px;
+            font-size: 12px; outline: none; font-family: inherit; resize: vertical;
+            min-height: 32px; max-height: 80px;
+        }
+        .note-edit textarea:focus { border-color: #0051af; }
+        .note-edit .save-btn {
+            padding: 4px 10px; background: #0051af; color: white; border: none;
+            border-radius: 6px; font-size: 11px; font-weight: 600; cursor: pointer;
+            flex-shrink: 0; align-self: flex-start; transition: background 0.15s;
+        }
+        .note-edit .save-btn:hover { background: #003D7A; }
+        .note-edit .save-btn:disabled { background: #cbd5e0; cursor: not-allowed; }
+        .note-edit .save-btn.saved { background: #38a169; }
+        .visit-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; }
+        .visit-row b { color: #2d3748; font-weight: 600; min-width: 60px; }
+        .visit-row input[type="date"] {
+            padding: 4px 6px; border: 1.5px solid #e2e8f0; border-radius: 6px;
+            font-size: 11px; outline: none; font-family: inherit;
+        }
+        .visit-row input[type="date"]:focus { border-color: #0051af; }
+        .visit-add-btn {
+            background: #0051af; color: white; border: none; border-radius: 6px;
+            padding: 4px 10px; font-size: 11px; font-weight: 700; cursor: pointer;
+            white-space: nowrap;
+        }
+        .visit-add-btn:hover { background: #003D7A; }
+        .visit-add-btn:disabled { background: #cbd5e0; cursor: not-allowed; }
+        .visit-history-list {
+            display: flex; flex-wrap: wrap; gap: 4px; margin-top: 6px;
+        }
+        .visit-chip {
+            display: inline-flex; align-items: center; gap: 4px;
+            background: #e6f4ea; color: #1e7e45; border: 1px solid #a3d9b8;
+            border-radius: 12px; padding: 2px 4px 2px 8px; font-size: 11px; font-weight: 600;
+        }
+        .visit-chip .visit-del {
+            background: rgba(30,126,69,0.15); color: #1e7e45; border: none;
+            border-radius: 50%; width: 15px; height: 15px; line-height: 1;
+            font-size: 12px; cursor: pointer; padding: 0;
+            display: inline-flex; align-items: center; justify-content: center;
+        }
+        .visit-chip .visit-del:hover { background: #dc2626; color: white; }
+        .visit-empty { font-size: 11px; color: #a0aec0; font-style: italic; }
+
+        /* ===== 라벨 ===== */
+        .leaflet-tooltip.bank-label {
+            background: transparent !important; border: none !important;
+            box-shadow: none !important; padding: 0 !important;
+        }
+        .leaflet-tooltip-top.bank-label:before { display: none !important; }
+        .label-box {
+            background: #fff;
+            border: 2px solid #3388ff;
+            border-radius: 5px;
+            padding: var(--label-padding, 3px 7px);
+            text-align: center;
+            white-space: nowrap;
+            box-shadow: 0 2px 6px rgba(0,0,0,0.12);
+            transform: scale(var(--label-scale, 1));
+            transform-origin: center bottom;
+            transition: transform 0.15s ease;
+            min-width: var(--label-min-width, 60px);
+            max-width: var(--label-max-width, 180px);
+        }
+        .label-box .lbl-name {
+            font-weight: 700;
+            color: #1a202c;
+            font-size: var(--label-font-main, 11px);
+        }
+        .label-box .lbl-bank {
+            font-size: var(--label-font-sub, 9px);
+            color: #fff;
+            padding: 1px 5px;
+            border-radius: 3px;
+            display: inline-block;
+            margin-top: 2px;
+        }
+        .label-box .lbl-visit-done {
+            font-size: 8px; font-weight: 700; color: #059669; background: #d1fae5;
+            padding: 0 4px; border-radius: 2px; border: 1px solid #34d399;
+            display: inline-block; margin-top: 2px; margin-left: 3px;
+        }
+        .labels-hidden .bank-label { display: none !important; }
+
+        /* 컨트롤 */
+        .label-toggle-ctrl {
+            background: rgba(255,255,255,0.96); padding: 6px 8px; border-radius: 6px;
+            box-shadow: 0 1px 5px rgba(0,0,0,0.2); font: 11px sans-serif;
+        }
+        .label-toggle-ctrl button {
+            font-size: 10px; padding: 3px 8px; cursor: pointer; border: 1px solid #ddd;
+            border-radius: 4px; background: #fff; margin-right: 3px;
+        }
+        .label-toggle-ctrl button:hover { background: #f0f7ff; }
+
+        /* 모바일 */
+        #mobile-toggle {
+            display: none; position: fixed; bottom: 20px; left: 50%; transform: translateX(-50%);
+            z-index: 4000; background: linear-gradient(135deg, #1a365d, #2b6cb0); color: white;
+            border: none; border-radius: 30px; padding: 11px 22px; font-size: 13px; font-weight: 700;
+            cursor: pointer; box-shadow: 0 4px 14px rgba(26,54,93,0.4);
+        }
+        .drawer-handle { display: none; width: 40px; height: 4px; background: #cbd5e0; border-radius: 2px; margin: 8px auto 4px; }
+        #side-panel-close {
+            display: none; position: absolute; top: 8px; right: 10px;
+            width: 32px; height: 32px; border: none; border-radius: 50%;
+            background: rgba(255,255,255,0.2); color: white;
+            font-size: 22px; line-height: 1; cursor: pointer;
+            z-index: 1; padding: 0;
+        }
+        #side-panel-close:hover { background: rgba(255,255,255,0.35); }
+        #panel-overlay { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.3); z-index: 2999; }
+
+        @media (max-width: 768px) {
+            #map, #kakao-map { left: 0; width: 100%; }
+            #side-panel {
+                position: fixed; top: auto; left: 0; right: 0; bottom: 0;
+                width: 100%; height: 60vh; border-radius: 14px 14px 0 0;
+                box-shadow: 0 -4px 20px rgba(0,0,0,0.15);
+                transform: translateY(100%); transition: transform 0.3s ease;
+            }
+            #side-panel.open { transform: translateY(0); }
+            .drawer-handle { display: block; }
+            #side-panel-close { display: block; }
+            .panel-header { padding: 6px 44px 12px 16px; border-radius: 14px 14px 0 0; }
+            #mobile-toggle { display: block; }
+            #side-panel.open ~ #mobile-toggle { display: none; }
+            #side-panel.open ~ #panel-overlay { display: block; }
+            .leaflet-popup-content { width: 250px !important; }
+            .leaflet-popup-content.ibk-popup-wrap { width: 280px !important; }
+        }
+
+        /* ============================================================
+           홈 화면 (모바일 전용)
+           ============================================================ */
+        #home-screen {
+            display: none;
+            position: fixed;
+            inset: 0;
+            background: linear-gradient(160deg, #1a365d 0%, #2b6cb0 60%, #4299e1 100%);
+            z-index: 5500;
+            overflow-y: auto;
+            -webkit-overflow-scrolling: touch;
+        }
+        #home-screen.visible { display: block; }
+
+        .home-header {
+            padding: 32px 24px 20px;
+            color: white;
+        }
+        .home-header h1 {
+            font-size: 22px;
+            font-weight: 800;
+            margin-bottom: 4px;
+            letter-spacing: -0.3px;
+        }
+        .home-header .home-sub {
+            font-size: 12px;
+            opacity: 0.85;
+        }
+        .home-header .home-sync {
+            font-size: 11px;
+            margin-top: 8px;
+            opacity: 0.8;
+        }
+
+        .home-stats {
+            margin: 0 16px 18px;
+            background: rgba(255,255,255,0.12);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border-radius: 14px;
+            padding: 14px 16px;
+            color: white;
+            display: grid;
+            grid-template-columns: repeat(3, 1fr);
+            gap: 10px;
+            border: 1px solid rgba(255,255,255,0.15);
+        }
+        .home-stat { text-align: center; }
+        .home-stat .num {
+            font-size: 22px; font-weight: 800; line-height: 1.1; display: block;
+        }
+        .home-stat .lbl {
+            font-size: 10px; font-weight: 600; opacity: 0.85; margin-top: 3px; display: block;
+        }
+        .home-stat.done .num { color: #9ae6b4; }
+        .home-stat.plan .num { color: #fbd38d; }
+        .home-stat.stale .num { color: #feb2b2; }
+
+        .home-cards {
+            padding: 0 16px 24px;
+            display: flex; flex-direction: column; gap: 14px;
+        }
+        .home-card {
+            background: white;
+            border-radius: 18px;
+            padding: 22px 20px;
+            cursor: pointer;
+            box-shadow: 0 8px 24px rgba(0,0,0,0.15);
+            transition: transform 0.15s, box-shadow 0.15s;
+            min-height: 88px;
+            display: flex; align-items: center; gap: 16px;
+            -webkit-tap-highlight-color: transparent;
+        }
+        .home-card:active {
+            transform: scale(0.97);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        }
+        .home-card .home-icon {
+            font-size: 36px; line-height: 1; flex-shrink: 0;
+            width: 56px; height: 56px;
+            display: flex; align-items: center; justify-content: center;
+            border-radius: 14px;
+            background: linear-gradient(135deg, #f7fafc, #edf2f7);
+        }
+        .home-card.card-cal .home-icon { background: linear-gradient(135deg, #fef3c7, #fde68a); }
+        .home-card.card-doc .home-icon { background: linear-gradient(135deg, #d1fae5, #a7f3d0); }
+        .home-card.card-map .home-icon { background: linear-gradient(135deg, #dbeafe, #bfdbfe); }
+        .home-card .home-text { flex: 1; min-width: 0; }
+        .home-card .home-title {
+            font-size: 16px; font-weight: 800; color: #1a202c; margin-bottom: 3px;
+        }
+        .home-card .home-desc {
+            font-size: 12px; color: #718096; line-height: 1.4;
+        }
+        .home-card .home-arrow {
+            font-size: 22px; color: #cbd5e0; font-weight: 300;
+        }
+
+        .home-footer {
+            padding: 12px 24px 32px;
+            text-align: center; color: rgba(255,255,255,0.6); font-size: 10px;
+        }
+
+        /* ============================================================
+           좌상단 ← 홈 버튼 (모바일에서만)
+           ============================================================ */
+        #home-back-btn {
+            display: none;
+            position: fixed; top: 12px; left: 12px;
+            z-index: 4500;
+            background: white; border: none; border-radius: 24px;
+            padding: 8px 14px 8px 10px;
+            font-size: 13px; font-weight: 700; color: #1a365d;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+            min-height: 36px;
+            align-items: center; gap: 4px;
+        }
+        #home-back-btn:active { transform: scale(0.95); }
+
+        /* ============================================================
+           모바일 햄버거 메뉴 (우측 상단 4버튼 통합)
+           ============================================================ */
+        #mobile-menu-btn {
+            display: none;
+            position: fixed; top: 12px; right: 12px;
+            z-index: 4500;
+            background: white; border: none; border-radius: 50%;
+            width: 44px; height: 44px;
+            font-size: 20px;
+            box-shadow: 0 3px 10px rgba(0,0,0,0.2);
+            cursor: pointer;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #mobile-menu-btn:active { transform: scale(0.93); }
+
+        #mobile-menu-sheet {
+            display: none;
+            position: fixed; top: 64px; right: 12px;
+            z-index: 4400;
+            background: white; border-radius: 12px;
+            box-shadow: 0 8px 28px rgba(0,0,0,0.2);
+            min-width: 160px;
+            overflow: hidden;
+            animation: slideDown 0.18s ease;
+        }
+        #mobile-menu-sheet.visible { display: block; }
+        @keyframes slideDown {
+            from { opacity: 0; transform: translateY(-6px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        #mobile-menu-sheet button {
+            display: block; width: 100%;
+            padding: 12px 16px;
+            border: none; background: white;
+            text-align: left;
+            font-size: 13px; font-weight: 600; color: #2d3748;
+            cursor: pointer;
+            border-bottom: 1px solid #f0f4f8;
+            -webkit-tap-highlight-color: transparent;
+        }
+        #mobile-menu-sheet button:last-child { border-bottom: none; }
+        #mobile-menu-sheet button:active { background: #f0f7ff; }
+        #mobile-menu-sheet button.active {
+            background: #ebf4ff; color: #0051af;
+        }
+
+        /* ============================================================
+           모바일 반응형 보강
+           ============================================================ */
+        @media (max-width: 768px) {
+            #home-back-btn { display: flex; }
+            #mobile-menu-btn { display: block; }
+
+            /* 우측 상단 기존 컨트롤은 모바일에서 숨김 (햄버거로 대체) */
+            .label-toggle-ctrl { display: none !important; }
+
+            /* 사이드 드로어 높이 확장 */
+            #side-panel { height: 75vh !important; }
+            .drawer-handle {
+                width: 48px; height: 5px;
+                margin: 10px auto 6px;
+                background: #a0aec0;
+            }
+
+            /* 모바일 검색·칩 폰트 키우기 (터치 친화) */
+            .filter-section .chip,
+            .ibk-section .chip {
+                font-size: 12px;
+                padding: 6px 12px;
+                min-height: 32px;
+                display: inline-flex;
+                align-items: center;
+            }
+            .search-input {
+                font-size: 14px;
+                padding: 10px 12px;
+            }
+
+            /* IBK 필터 섹션 접기/펴기 */
+            .ibk-section .ibk-toggle {
+                display: flex;
+                align-items: center;
+                justify-content: space-between;
+                cursor: pointer;
+                user-select: none;
+            }
+            .ibk-section .ibk-toggle .arrow {
+                font-size: 12px; color: #a0aec0;
+                transition: transform 0.2s;
+            }
+            .ibk-section.collapsed .ibk-toggle .arrow {
+                transform: rotate(-90deg);
+            }
+            .ibk-section.collapsed .ibk-collapsible { display: none; }
+
+            /* 모바일에서는 지역본부 필터 숨김 (담당자 필터로 충분) */
+            .ibk-region-block { display: none; }
+
+            /* 팝업 모바일 친화 */
+            .leaflet-popup-content {
+                width: calc(100vw - 60px) !important;
+                max-width: 320px !important;
+            }
+            .leaflet-popup-content.ibk-popup-wrap {
+                width: calc(100vw - 60px) !important;
+                max-width: 340px !important;
+            }
+            .popup-inner { padding: 16px; }
+
+            /* 모바일에서 행별 비고 입력 폰트 살짝 크게 */
+            .history-table .row-note-input {
+                font-size: 12px; padding: 5px 7px; min-height: 28px;
+            }
+            .history-table th, .history-table td { padding: 5px 4px; }
+
+            /* 캘린더 셀 키우기 */
+            .cal-day { min-height: 56px; font-size: 12px; }
+            .cal-day .name-chip { font-size: 10px; }
+
+            /* 일정 모달 풀스크린 가깝게 */
+            .cal-modal {
+                width: calc(100vw - 24px);
+                max-width: none;
+            }
+
+            /* 플로팅 패널: 햄버거 메뉴 아래로 */
+            #cal-floating, #docs-floating, #heat-floating { top: 64px; }
+        }
+
+        /* PC에서는 홈 화면, 좌상단 홈 버튼, 햄버거 메뉴 모두 숨김 */
+        @media (min-width: 769px) {
+            #home-screen, #home-back-btn, #mobile-menu-btn, #mobile-menu-sheet {
+                display: none !important;
+            }
+        }
+    </style>
+</head>
+<body>
+    <!-- ============================================================
+         홈 화면 (모바일 전용 — 첫 진입 시 표시)
+         ============================================================ -->
+    <div id="home-screen">
+        <div class="home-header">
+            <h1>🏦 IBK 영업점 관리</h1>
+            <div class="home-sub">서울 · 인천 · 경기 영업점 현황 및 일정</div>
+            <div class="home-sync" id="home-sync-status">⏳ 데이터 로드 중…</div>
+        </div>
+
+        <div class="home-stats">
+            <div class="home-stat done">
+                <span class="num" id="home-stat-done">-</span>
+                <span class="lbl">방문완료</span>
+            </div>
+            <div class="home-stat plan">
+                <span class="num" id="home-stat-plan">-</span>
+                <span class="lbl">방문예정</span>
+            </div>
+            <div class="home-stat stale">
+                <span class="num" id="home-stat-stale">-</span>
+                <span class="lbl">1년+ 미접수</span>
+            </div>
+        </div>
+
+        <div class="home-cards">
+            <div class="home-card card-cal" id="home-card-cal">
+                <div class="home-icon">📅</div>
+                <div class="home-text">
+                    <div class="home-title">팀 캘린더</div>
+                    <div class="home-desc"><span id="home-card-cal-desc">이번달 일정 확인 / 추가</span></div>
+                </div>
+                <div class="home-arrow">›</div>
+            </div>
+            <div class="home-card card-doc" id="home-card-doc">
+                <div class="home-icon">✅</div>
+                <div class="home-text">
+                    <div class="home-title">IBK 체크리스트</div>
+                    <div class="home-desc">현장 점검용 체크리스트 PDF</div>
+                </div>
+                <div class="home-arrow">›</div>
+            </div>
+            <div class="home-card card-map" id="home-card-map">
+                <div class="home-icon">🗺️</div>
+                <div class="home-text">
+                    <div class="home-title">영업점 지도</div>
+                    <div class="home-desc"><span id="home-card-map-desc">전체 영업점 위치 · 정감이력 · 거래처</span></div>
+                </div>
+                <div class="home-arrow">›</div>
+            </div>
+        </div>
+
+        <div class="home-footer">
+            IBK 영업점 관리 시스템 · 데이터는 30초마다 자동 동기화
+        </div>
+    </div>
+
+    <!-- 모바일 좌상단 ← 홈 버튼 (지도 화면일 때 노출) -->
+    <button id="home-back-btn" type="button">← 홈</button>
+
+    <!-- 모바일 우상단 햄버거 메뉴 -->
+    <button id="mobile-menu-btn" type="button">☰</button>
+    <div id="mobile-menu-sheet">
+        <button id="mm-lbl">🏷️ 라벨 켜기/끄기</button>
+        <button id="mm-cal">📅 캘린더</button>
+        <button id="mm-docs">📁 자료실</button>
+        <button id="mm-heat">🔥 정감 히트맵</button>
+    </div>
+
+    <div id="side-panel">
+        <div class="drawer-handle"></div>
+        <button id="side-panel-close" type="button" aria-label="목록 닫기">×</button>
+        <div class="panel-header">
+            <h1>🏦 은행 지점 지도</h1>
+            <div class="subtitle">서울 · 인천 · 경기 은행 지점 현황</div>
+            <div class="panel-count">표시 중: <span id="visible-count">0</span>건</div>
+            <div class="sync-status pending" id="sync-status">⏳ IBK 서버 연결 중…</div>
+        </div>
+
+        <div class="filter-section">
+            <label>은행 필터 (클릭으로 ON/OFF)</label>
+            <div class="filter-row" id="bank-filters"></div>
+            <input type="text" class="search-input" id="search-input" placeholder="점포명 / 주소 검색">
+            <div class="edit-backup">
+                <span class="edit-backup-lbl">💾 내 편집 백업 <span title="기업은행 외 은행의 방문·비고는 이 브라우저에만 저장됩니다. 기기 이동/캐시삭제 대비 백업하세요.">ⓘ</span></span>
+                <button id="edit-export">내보내기</button>
+                <button id="edit-import-btn">불러오기</button>
+                <input type="file" id="edit-import" accept="application/json" style="display:none;">
+            </div>
+        </div>
+
+        <!-- IBK 전용 필터 섹션 -->
+        <div class="ibk-section" id="ibk-filter-section">
+            <div class="ibk-title ibk-toggle" id="ibk-toggle-btn">
+                <span>🏦 IBK기업은행 전용 필터</span>
+                <span class="arrow">▼</span>
+            </div>
+            <div class="ibk-collapsible">
+                <div class="ibk-region-block">
+                    <label>지역본부</label>
+                    <div class="filter-row" id="ibk-region-filters"></div>
+                </div>
+                <label>담당자 <span style="color:#a0aec0;font-weight:400;">(예정/완료)</span></label>
+                <div class="filter-row" id="ibk-manager-filters"></div>
+                <label>방문 상태</label>
+                <div class="filter-row">
+                    <span class="chip active" id="ibk-visit-all" data-val="all" style="background:#0051af;border-color:#0051af;color:white;">전체</span>
+                    <span class="chip" id="ibk-visit-planned" data-val="planned" style="color:#d97706;border-color:#f59e0b;">📋 방문예정만</span>
+                    <span class="chip" id="ibk-visit-done" data-val="done" style="color:#059669;border-color:#34d399;">✅ 방문완료만</span>
+                </div>
+                <label>접수이력</label>
+                <div class="filter-row">
+                    <span class="chip" id="ibk-stale-filter" style="color:#dc2626;border-color:#f87171;">⚠️ 1년 이내 접수이력 없음</span>
+                    <span class="chip" id="ibk-reg26-filter" style="color:#dc2626;border-color:#f87171;">🚫 본사 거래처만</span>
+                    <span class="chip" id="bank-hq-filter" style="color:#dc2626;border-color:#f87171;" title="IBK 외 은행 중, 최근 1년 본사(감정서번호 01) 접수 3건 이상 지점만">🚫 타은행 본사 거래처만</span>
+                </div>
+            </div>
+        </div>
+
+        <div id="list-container"><div class="empty-state">데이터 로드 중…</div></div>
+    </div>
+
+    <!-- 일정 추가/수정 모달 -->
+    <div class="cal-modal-overlay" id="cal-modal">
+        <div class="cal-modal">
+            <h3 id="cal-modal-title">일정 추가</h3>
+            <div class="field">
+                <label>제목 *</label>
+                <input type="text" id="cal-f-title" placeholder="일정 제목">
+            </div>
+            <div class="field">
+                <label>담당자</label>
+                <select id="cal-f-member">
+                    <option value="">- 담당자 선택 -</option>
+                </select>
+            </div>
+            <div class="field">
+                <label class="checkbox-row">
+                    <input type="checkbox" id="cal-f-allday">
+                    <span>종일 일정</span>
+                </label>
+            </div>
+            <div class="field">
+                <label>날짜</label>
+                <input type="date" id="cal-f-date">
+            </div>
+            <div class="field" id="cal-f-time-row">
+                <label>시간</label>
+                <div class="row2">
+                    <input type="time" id="cal-f-start" value="09:00">
+                    <input type="time" id="cal-f-end" value="10:00">
+                </div>
+            </div>
+            <div class="field">
+                <label>장소</label>
+                <input type="text" id="cal-f-location" placeholder="장소 (선택)">
+            </div>
+            <div class="field">
+                <label>메모</label>
+                <textarea id="cal-f-desc" placeholder="메모 (선택)"></textarea>
+            </div>
+            <div class="cal-modal-actions">
+                <button class="btn-cancel" id="cal-btn-cancel">취소</button>
+                <button class="btn-delete" id="cal-btn-delete" style="display:none;">삭제</button>
+                <button class="btn-save" id="cal-btn-save">저장</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="panel-overlay"></div>
+    <button id="mobile-toggle">📋 목록 보기</button>
+    <div id="kakao-map"></div>
+    <div id="map"></div>
+
+    <!-- 우측 상단 플로팅 히트맵 패널 -->
+    <div id="heat-floating">
+        <div class="heat-header">
+            <span>🔥 정감 히트맵 (최근 2년)</span>
+            <button class="heat-close" id="heat-close-btn">×</button>
+        </div>
+        <div class="heat-body">
+            <div class="heat-section">
+                <label>정감자 필터</label>
+                <input type="text" class="heat-search" id="heat-search" placeholder="정감자명 검색…">
+                <div class="heat-chips" id="heat-chips"></div>
+            </div>
+            <div class="heat-section">
+                <div class="heat-stats" id="heat-stats">데이터 로드 대기 중…</div>
+                <div class="heat-legend">
+                    <span>적음</span>
+                    <div class="gradient"></div>
+                    <span>많음</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- 우측 상단 플로팅 자료실 패널 -->
+    <div id="docs-floating">
+        <div class="docs-header">
+            <span>📁 자료실</span>
+            <button class="docs-close" id="docs-close-btn">×</button>
+        </div>
+        <div class="docs-body">
+            <ul class="docs-tree">
+                <!-- 1. IBK 체크리스트 -->
+                <li>
+                    <div class="docs-file" data-pdf="data/pdf/ibk_checklist.pdf">
+                        <span class="file-name">1. IBK 체크리스트</span>
+                    </div>
+                </li>
+                <!-- 2. 지역별·물건별 담보인정비율표 -->
+                <li>
+                    <div class="docs-folder" data-folder="ratio">
+                        <span class="arrow">▶</span>
+                        <span>📂</span>
+                        <span>2. 지역별·물건별 담보인정비율표</span>
+                    </div>
+                    <ul class="docs-children">
+                        <li><div class="docs-file" data-pdf="data/pdf/ratio_seoul.pdf"><span class="file-name">서울</span></div></li>
+                        <li><div class="docs-file" data-pdf="data/pdf/ratio_incheon.pdf"><span class="file-name">인천</span></div></li>
+                        <li><div class="docs-file" data-pdf="data/pdf/ratio_gyeonggi.pdf"><span class="file-name">경기</span></div></li>
+                    </ul>
+                </li>
+                <!-- 3. 케이스 스터디 (공유 메모장) -->
+                <li>
+                    <div class="docs-file" data-action="case-study">
+                        <span class="file-name">3. 케이스 스터디</span>
+                    </div>
+                </li>
+                <!-- 4. 여신업무 취급세칙 -->
+                <li>
+                    <div class="docs-file" data-pdf="data/pdf/credit_rules.pdf">
+                        <span class="file-name">4. 여신업무 취급세칙</span>
+                    </div>
+                </li>
+            </ul>
+        </div>
+    </div>
+
+    <!-- 우측 상단 플로팅 케이스 스터디 패널 -->
+    <div id="case-floating">
+        <div class="case-header">
+            <span>📝 케이스 스터디 · 공유 메모장</span>
+            <button class="case-close" id="case-close-btn">×</button>
+        </div>
+        <div class="case-body">
+            <div class="case-form" id="case-form">
+                <div class="case-form-title" id="case-form-title">✍️ 새 메모 작성</div>
+                <div class="case-row">
+                    <div class="case-field">
+                        <label>생성자</label>
+                        <input type="text" id="case-f-author" placeholder="이름" maxlength="20">
+                    </div>
+                    <div class="case-field">
+                        <label>주제</label>
+                        <input type="text" id="case-f-topic" placeholder="예: 고양 원흥지구 낙찰율" maxlength="80">
+                    </div>
+                </div>
+                <div class="case-row">
+                    <div class="case-field full">
+                        <label>내용</label>
+                        <textarea id="case-f-content" rows="3" placeholder="현장에서 알게 된 정보, 담보평가 시 유의점, 사례 등을 자유롭게 공유…"></textarea>
+                    </div>
+                </div>
+                <div class="case-form-actions">
+                    <button class="case-cancel-btn" id="case-cancel-btn" style="display:none;">취소</button>
+                    <button class="case-save-btn" id="case-save-btn">등록</button>
+                </div>
+            </div>
+            <div class="case-list-title">
+                📌 전체 메모 <span class="case-count" id="case-count">0건</span>
+            </div>
+            <div id="case-list"><div class="case-empty">로드 중…</div></div>
+        </div>
+    </div>
+
+    <!-- 우측 상단 플로팅 캘린더 패널 -->
+    <div id="cal-floating">
+        <div class="cal-header">
+            <span>📅 팀 캘린더</span>
+            <button class="cal-close" id="cal-close-btn">×</button>
+        </div>
+        <div class="cal-body">
+            <div class="cal-nav">
+                <button id="cal-prev">‹</button>
+                <span id="cal-title">- 년 -월</span>
+                <button id="cal-next">›</button>
+            </div>
+            <!-- 담당자별 일정 누적 통계 (5/4 ~ 오늘) -->
+            <div class="cal-member-stats">
+                <div class="stats-label">
+                    📊 <span id="stats-range">- ~ -</span> 담당자별
+                    <span class="stats-total" id="stats-total"></span>
+                </div>
+                <div class="stats-chips" id="stats-chips">
+                    <span class="stats-loading">로드 중…</span>
+                </div>
+            </div>
+            <div class="cal-grid" id="cal-grid"></div>
+            <div class="cal-events">
+                <h4>
+                    <span id="cal-events-date">선택일</span>
+                    <button class="add-btn" id="cal-add-btn">+ 추가</button>
+                </h4>
+                <div id="cal-events-list"></div>
+            </div>
+            <!-- 월 요약 표 -->
+            <div class="cal-summary">
+                <h4><span id="cal-summary-title">이 달 일정</span></h4>
+                <div id="cal-summary-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=231190ac1aca72ada0b739110d8a0eb4"></script>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
+    <script src="js/kakao_base.js"></script>
+    <!-- 은행별 데이터 (은행 추가 시 이 목록에 파일 한 줄만 추가) -->
+    <script src="data/banks/bank_shinhan.js"></script>
+    <script src="data/banks/bank_kb.js"></script>
+    <script src="data/banks/bank_hana.js"></script>
+    <script src="data/banks/bank_saemaul.js"></script>
+    <script src="data/banks/bank_suhyup.js"></script>
+    <script src="data/banks/bank_woori.js"></script>
+    <script src="data/banks/bank_nonghyup.js"></script>
+    <script src="data/branches.js"></script>
+    <script src="data/reg26.js"></script>
+    <script>
+    // ============================================================
+    // 설정 (IBK 전용 Apps Script)
+    // ============================================================
+    var API_URL = 'https://script.google.com/macros/s/AKfycbwhXSrlElhN59TrRtxCEDuVUx0snWPMPyrdCH7j3yYUNLCAlcWY8m6lu1hJIRrPZ1l0/exec';
+    var API_TOKEN = 'IBK15520!';
+
+    function setSync(state, msg){
+        var el = document.getElementById('sync-status');
+        if(!el) return;
+        el.className = 'sync-status ' + state;
+        el.textContent = msg;
+    }
+
+    function apiLoad(){
+        var url = API_URL + '?token=' + encodeURIComponent(API_TOKEN) + '&action=load';
+        return fetch(url).then(function(r){
+            if(!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        });
+    }
+    function apiSave(payload){
+        payload.token = API_TOKEN;
+        setSync('pending', '💾 저장 중…');
+        return fetch(API_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+            body: JSON.stringify(payload)
+        }).then(function(r){
+            if(!r.ok) throw new Error('HTTP ' + r.status);
+            return r.json();
+        }).then(function(res){
+            if(!res.ok) throw new Error(res.error || '저장 실패');
+            setSync('ok', '✓ IBK 동기화 완료 ' + new Date().toLocaleTimeString('ko-KR'));
+            return res;
+        }).catch(function(err){
+            console.error(err);
+            setSync('err', '⚠ 저장 실패: ' + err.message);
+            throw err;
+        });
+    }
+
+    // ============================================================
+    // 은행 색상
+    // ============================================================
+    var BANK_COLORS = {
+        'IBK기업은행':'#0051af', 'NH농협은행':'#00a651', '신한은행':'#0046ff', '우리은행':'#0067ac',
+        'KB국민은행':'#ffb300', '하나은행':'#009688',
+        '새마을금고':'#6a1b9a', 'Sh수협은행':'#0277bd'
+    };
+    function getBankColor(n){ return BANK_COLORS[n] || '#888'; }
+
+    // ============================================================
+    // IBK 데이터 (branches.js의 IBK_BRANCHES)
+    // ============================================================
+    var ibkData = (typeof IBK_BRANCHES !== 'undefined') ? IBK_BRANCHES : [];
+    var ibkByName = {};
+    ibkData.forEach(function(b){ ibkByName[b.name] = b; });
+
+    // 26년상반기거래처 정적 데이터 적용 (data/reg26.js)
+    if(typeof REG26_DATA !== 'undefined'){
+        ibkData.forEach(function(b){
+            var d = REG26_DATA[b.name];
+            if(d){ b.reg_26h = d[0]; b.reg_26h_type = d[1]; }
+        });
+    }
+
+    // ============================================================
+    // 지도 초기화
+    // ============================================================
+    var map = L.map('map', {
+        zoomControl: true, maxZoom: 19, minZoom: 7, attributionControl: false
+    }).setView([37.5, 127.0], 10);
+    initKakaoBaseMap(map, { mapTypeId: 'ROADMAP' });
+
+    // 줌별 라벨 크기
+    var labelScaleConfig = [
+        {maxZoom:10, scale:0.55, fontMain:'9px', fontSub:'7px', padding:'2px 5px', minW:'45px', maxW:'110px'},
+        {maxZoom:12, scale:0.7, fontMain:'10px', fontSub:'8px', padding:'3px 6px', minW:'55px', maxW:'140px'},
+        {maxZoom:14, scale:0.85, fontMain:'10px', fontSub:'8px', padding:'3px 7px', minW:'60px', maxW:'160px'},
+        {maxZoom:16, scale:1.0, fontMain:'11px', fontSub:'9px', padding:'4px 8px', minW:'70px', maxW:'180px'},
+        {maxZoom:99, scale:1.1, fontMain:'12px', fontSub:'9px', padding:'5px 9px', minW:'75px', maxW:'200px'}
+    ];
+    function updateLabelScale(){
+        var z = map.getZoom();
+        var cfg = labelScaleConfig[labelScaleConfig.length-1];
+        for(var i = 0; i < labelScaleConfig.length; i++){
+            if(z <= labelScaleConfig[i].maxZoom){ cfg = labelScaleConfig[i]; break; }
+        }
+        var r = document.documentElement;
+        r.style.setProperty('--label-scale', cfg.scale);
+        r.style.setProperty('--label-font-main', cfg.fontMain);
+        r.style.setProperty('--label-font-sub', cfg.fontSub);
+        r.style.setProperty('--label-padding', cfg.padding);
+        r.style.setProperty('--label-min-width', cfg.minW);
+        r.style.setProperty('--label-max-width', cfg.maxW);
+    }
+    map.on('zoomend', updateLabelScale);
+    updateLabelScale();
+
+    // ============================================================
+    // 라벨 빌더 (1·2차용 단순 라벨)
+    // ============================================================
+    function buildLabel(bankName, branchName, props){
+        var hqNames = bankHqNames(props);
+        var isHq = hqNames.length > 0;
+        var local = loadBankVisit(bankName, branchName);
+        var visited = local.visit_status === 'Y';
+        // 색 우선순위: 본사거래처 빨강 > 방문완료 초록 > 은행색 (IBK 동일)
+        var c = isHq ? '#dc2626' : (visited ? '#059669' : getBankColor(bankName));
+        var nameHtml = escHtml(branchName);
+        if(isHq){   // 본사 거래처 평가사명 함께 표시 (IBK 동일)
+            nameHtml += ' <span style="color:#dc2626;">/ ' + escHtml(hqNames.join('·')) + '</span>';
+        }
+        var html = '<div class="label-box" style="border-color:' + c + ';">' +
+            '<div class="lbl-name">' + nameHtml + '</div>' +
+            '<span class="lbl-bank" style="background:' + c + ';">' + escHtml(bankName) + '</span>';
+        if(visited){ html += '<span class="lbl-visit-done">✅ 방문</span>'; }
+        html += '</div>';
+        return html;
+    }
+
+    // 타은행 26년 거래처: reg_26h 문자열("이해성(본사3)/…") — IBK와 동일 포맷/기준
+    //   기준: 지점×평가사 관계가 최근1년 3건 이상 (감정서 01=본사 / 그외=지사), 빌드시점 계산
+    function parseReg26(props){
+        var out = {hq: [], br: []};
+        var s = props && props.reg_26h; if(!s) return out;
+        var re = /([^\/()]+)\((본사|지사)(\d+)\)/g, m;
+        while((m = re.exec(s)) !== null){
+            (m[2] === '본사' ? out.hq : out.br).push({name: m[1].trim(), cnt: Number(m[3])});
+        }
+        return out;
+    }
+    function bankHqNames(props){ return
