@@ -52,7 +52,7 @@
             <option value="resid">산정 오차 (공시지가 − 시가수준×반영률)</option>
             <option value="zdev">균형성 편차 (동일 그룹 대비)</option>
         </select>
-        <label class="toggle-row"><input type="checkbox" id="f-label" checked> 지가 라벨 표시 (확대 시)</label>
+        <label class="toggle-row"><input type="checkbox" id="f-label" checked> 요약 라벨 표시 (겹치지 않는 것만)</label>
     </div>
 
     <div id="list-container"><div class="empty-state">데이터 로딩 중…</div></div>
@@ -80,7 +80,7 @@
 <div id="legend">
     <div class="lg-title" id="lg-title">공시지가 (원/㎡)</div>
     <div id="lg-rows"></div>
-    <div class="lg-note" id="lg-note">원 크기 = 필지 면적</div>
+    <div class="lg-note" id="lg-note"></div>
 </div>
 
 <!-- ============================ 산정 패널 ============================ -->
@@ -140,6 +140,7 @@
 
 <script src="data/parcels.js"></script>
 <script src="data/coords.js"></script>
+<script src="data/shapes.js"></script>
 <script src="js/appraise.js"></script>
 <script src="js/kakao_base.js"></script>
 <script src="js/geocode.js"></script>

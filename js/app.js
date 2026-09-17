@@ -92,12 +92,12 @@ function colorOf(r) {
     return scale.colors[b.length];
 }
 
+/* 마커 크기는 면적과 무관하게 일정하다 — 크기는 아무 값도 encoding 하지 않고,
+   색(선택한 지표)만 읽으면 되도록 한다. 줌에 따라 시인성만 조절. */
 function radiusOf(r) {
     var z = map.getZoom();
-    var base = Math.sqrt(Math.max(r.area, 1)) / 9;
-    var rad = Math.max(3.4, Math.min(15, base));
-    if (z <= 12) rad *= .62; else if (z <= 14) rad *= .82;
-    return rad;
+    var base = z <= 11 ? 3.6 : (z <= 14 ? 4.4 : 5.2);
+    return (selected && selected.key === r.key) ? base + 3 : base;
 }
 
 /* ============================================================
@@ -172,46 +172,162 @@ function applyFilter() {
    ============================================================ */
 function renderMarkers() {
     markerLayer.clearLayers();
-    labelLayer.clearLayers();
     var withGeo = filtered.filter(function (r) { return r.lat; });
 
     withGeo.forEach(function (r) {
         var isSel = selected && selected.key === r.key;
         var m = L.circleMarker([r.lat, r.lng], {
-            radius: radiusOf(r) + (isSel ? 4 : 0),
+            radius: radiusOf(r),
             fillColor: colorOf(r),
-            fillOpacity: .88,
-            color: isSel ? '#111' : '#fff',     // 겹치는 마커 분리용 2px 표면 링
-            weight: isSel ? 3 : 2,
+            fillOpacity: .9,
+            color: isSel ? '#111' : '#fff',     // 겹치는 마커 분리용 표면 링
+            weight: 2,
             opacity: 1
         });
         m.on('click', function () { select(r, false); });
-        m.bindTooltip(tipHtml(r), { direction: 'top', offset: [0, -4], className: 'pt-tip' });
+        m.bindTooltip(tipHtml(r), { direction: 'top', offset: [0, -4] });
         markerLayer.addLayer(m);
     });
 
-    // 라벨: 확대했고 표시 건수가 적을 때만 (겹침 방지)
-    if (state.showLabel && map.getZoom() >= 16 && withGeo.length <= 150) {
-        withGeo.forEach(function (r) {
-            var c = colorOf(r);
-            var html = '<div class="label-box" style="border-color:' + c + ';">'
-                + '<div class="lbl-name">' + esc(r.jibun || r.loc) + '</div>'
-                + '<div class="lbl-price" style="color:' + c + ';">' + fmtWon(r.price) + '</div></div>';
-            labelLayer.addLayer(L.marker([r.lat, r.lng], {
-                icon: L.divIcon({ className: 'pin-wrap', html: html, iconSize: null, iconAnchor: [0, 34] }),
-                interactive: false
-            }));
-        });
-    }
-
+    renderLabels(withGeo);
+    renderShape();
     if (heatOn) renderHeat();
 }
+
+/* ---------- 요약 라벨 ----------
+   소재지 / 단가 / 용도지역 · 이용상황을 한 장에 담고, 클릭하면 산정 패널이 열린다.
+   1,043개를 전부 띄우면 못 읽으므로 화면 좌표에서 겹치는 것은 버린다.
+   우선순위: 선택 필지 → 검수 대상 → 지가 높은 순.                                */
+
+var LBL_W = 152, LBL_H = 58, LBL_OFF = 13, LBL_MAX = 260, LBL_PAD = 3;
+
+function labelHtml(r, isSel) {
+    var c = colorOf(r);
+    var flag = '';
+    if (r.flagged) {
+        var ic = r.auditLevel === 'critical' ? '⛔' : (r.auditLevel === 'serious' ? '🔺' : '⚠');
+        flag = '<span class="sl-flag ' + r.auditLevel + '">' + ic + '</span>';
+    }
+    return '<div class="sum-label' + (isSel ? ' sel' : '') + '" style="border-left-color:' + c + ';">'
+        + flag
+        + '<div class="sl-loc">' + esc(r.jibun || r.loc) + '</div>'
+        + '<div class="sl-price" style="color:' + c + ';">' + fmtWon(r.price)
+        + '<span>원/㎡</span></div>'
+        + '<div class="sl-meta">' + esc(r.zone1 || '-') + ' · ' + esc(r.use || '-') + '</div>'
+        + '</div>';
+}
+
+function overlaps(b, list) {
+    for (var i = 0; i < list.length; i++) {
+        var o = list[i];
+        if (b.x < o.x + o.w + LBL_PAD && b.x + b.w + LBL_PAD > o.x &&
+            b.y < o.y + o.h + LBL_PAD && b.y + b.h + LBL_PAD > o.y) return true;
+    }
+    return false;
+}
+
+function renderLabels(withGeo) {
+    labelLayer.clearLayers();
+    if (!state.showLabel) return;
+    if (!withGeo) withGeo = filtered.filter(function (r) { return r.lat; });
+
+    var size = map.getSize();
+    if (!size.x || !size.y) return;
+
+    var order = withGeo.slice().sort(function (a, b) {
+        var as = (selected && selected.key === a.key) ? 2 : (a.flagged ? 1 : 0);
+        var bs = (selected && selected.key === b.key) ? 2 : (b.flagged ? 1 : 0);
+        if (as !== bs) return bs - as;
+        return b.price - a.price;
+    });
+
+    var placed = [];
+    for (var i = 0; i < order.length && placed.length < LBL_MAX; i++) {
+        var r = order[i];
+        var p = map.latLngToContainerPoint([r.lat, r.lng]);
+        if (p.x < -LBL_W || p.x > size.x + LBL_W || p.y < -LBL_H || p.y > size.y + LBL_H) continue;
+
+        var box = { x: p.x - LBL_W / 2, y: p.y - LBL_H - LBL_OFF, w: LBL_W, h: LBL_H };
+        if (overlaps(box, placed)) continue;
+        placed.push(box);
+
+        var isSel = !!(selected && selected.key === r.key);
+        var mk = L.marker([r.lat, r.lng], {
+            icon: L.divIcon({
+                className: 'pin-wrap', html: labelHtml(r, isSel),
+                iconSize: [LBL_W, LBL_H], iconAnchor: [LBL_W / 2, LBL_H + LBL_OFF]
+            }),
+            interactive: true, keyboard: false,
+            zIndexOffset: isSel ? 1000 : 0
+        });
+        mk.on('click', (function (rec) {
+            return function () { select(rec, false); };
+        })(r));
+        labelLayer.addLayer(mk);
+    }
+    lastLabelCount = placed.length;
+}
+var lastLabelCount = 0;
 
 function tipHtml(r) {
     var flag = r.flagged ? ' <b style="color:#d03b3b">🚩' + r.flags.length + '</b>' : '';
     return '<b>' + esc(r.loc) + '</b>' + flag + '<br>'
         + esc(r.jimok) + ' · ' + fmtArea(r.area) + ' · ' + esc(r.use) + '<br>'
         + '<b>' + fmtWon(r.price) + '</b> 원/㎡ (' + fmtPct(r.calcChg, 1) + ')';
+}
+
+/* ---------- 필지 외곽선 ----------
+   카카오 SDK 는 Polygon(그리기)은 제공하지만 필지 경계 좌표 자체는 주지 않는다.
+   (services 에 Geocoder·Places 뿐, 지적 데이터 API 없음)
+   그래서 경계는 data/shapes.js 의 PARCEL_SHAPES 에서 받아 쓴다.
+     PARCEL_SHAPES = { "<PNU>": [[위도,경도], [위도,경도], ...] }
+   데이터가 없으면 아무것도 그리지 않고 원형 마커만 남는다.               */
+
+var shapeOverlays = [];
+
+function clearShapes() {
+    for (var i = 0; i < shapeOverlays.length; i++) shapeOverlays[i].setMap(null);
+    shapeOverlays = [];
+}
+
+function hasShapes() {
+    return !!(window.PARCEL_SHAPES && Object.keys(window.PARCEL_SHAPES).length);
+}
+
+function renderShape() {
+    clearShapes();
+    if (!kbase || !hasShapes()) return;
+    var km = kbase.kakaoMap, bounds = map.getBounds();
+
+    var targets = [];
+    if (selected && selected.lat) targets.push(selected);
+    // 충분히 확대했으면 화면 안 필지도 함께 (너무 많으면 건너뜀)
+    if (map.getZoom() >= 15.9) {
+        for (var i = 0; i < filtered.length && targets.length < 300; i++) {
+            var r = filtered[i];
+            if (!r.lat || (selected && r.key === selected.key)) continue;
+            if (bounds.contains([r.lat, r.lng])) targets.push(r);
+        }
+    }
+
+    targets.forEach(function (r) {
+        var ring = window.PARCEL_SHAPES[r.pnu];
+        if (!ring || ring.length < 3) return;
+        var path = ring.map(function (pt) { return new kakao.maps.LatLng(pt[0], pt[1]); });
+        var isSel = !!(selected && selected.key === r.key);
+        var c = colorOf(r);
+        var poly = new kakao.maps.Polygon({
+            map: km, path: path,
+            strokeWeight: isSel ? 4 : 2,
+            strokeColor: isSel ? '#111111' : c,
+            strokeOpacity: isSel ? 1 : 0.9,
+            strokeStyle: 'solid',
+            fillColor: c,
+            fillOpacity: isSel ? 0.38 : 0.16
+        });
+        kakao.maps.event.addListener(poly, 'click', function () { select(r, false); });
+        shapeOverlays.push(poly);
+    });
 }
 
 function renderHeat() {
@@ -287,7 +403,9 @@ function renderLegend() {
     }
     document.getElementById('lg-rows').innerHTML = rows.join('');
     document.getElementById('lg-note').textContent =
-        (scale.type === 'seq' ? '5분위 구간 · ' : '0 기준 대칭 구간 · ') + '원 크기 = 필지 면적';
+        (scale.type === 'seq' ? '5분위 구간' : '0 기준 대칭 구간')
+        + ' · 마커 크기는 모두 동일 (면적 무관)'
+        + (hasShapes() ? '' : ' · 라벨 클릭 = 세부정보');
 }
 
 function renderCounts() {
@@ -952,19 +1070,10 @@ function init() {
     };
     document.getElementById('panel-overlay').onclick = closePanel;
 
-    /* 줌에 따른 라벨/반경 */
-    map.on('zoomend', function () {
-        var z = map.getZoom(), r = document.documentElement.style;
-        var cfg = z <= 12 ? ['9px', '8px', '2px 5px', '44px', '110px']
-                : z <= 15 ? ['10px', '8px', '3px 6px', '56px', '140px']
-                : ['11px', '9px', '4px 8px', '70px', '180px'];
-        r.setProperty('--label-font-main', cfg[0]);
-        r.setProperty('--label-font-sub', cfg[1]);
-        r.setProperty('--label-padding', cfg[2]);
-        r.setProperty('--label-min-width', cfg[3]);
-        r.setProperty('--label-max-width', cfg[4]);
-        renderMarkers();
-    });
+    /* 줌이 바뀌면 마커 반경·라벨·외곽선을 모두 다시,
+       이동만 했으면 화면 겹침에 따라 라벨과 외곽선만 다시 계산한다. */
+    map.on('zoomend', renderMarkers);
+    map.on('moveend', function () { renderLabels(); renderShape(); });
 
     /* 폰트·레이아웃이 늦게 확정되는 경우 대비 */
     window.addEventListener('load', function () {
