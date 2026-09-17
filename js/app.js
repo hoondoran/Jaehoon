@@ -103,31 +103,20 @@ function radiusOf(r) {
 /* ============================================================
    3. 지도
    ============================================================ */
-var map = L.map('map', { zoomControl: true, minZoom: 9, maxZoom: 19, preferCanvas: true })
-    .setView([35.72, 128.45], 12);   // 대구 달성군 일원
+/* 배경지도는 카카오. Leaflet 은 그 위의 투명한 오버레이로만 쓴다.
+   카카오 레벨은 정수인데 대응하는 Leaflet 줌은 정수가 아니므로(kakao_base.js 참고)
+   zoomSnap:0 으로 두고 kakao_base 가 허용 격자에 스냅시킨다.
+   두 지도가 어긋나 보이지 않도록 줌 애니메이션은 끈다. */
+var map = L.map('map', {
+    zoomControl: true,
+    preferCanvas: true,
+    zoomSnap: 0,
+    zoomDelta: 1,
+    zoomAnimation: false,
+    attributionControl: false
+}).setView([35.72, 128.45], 12);   // 대구 달성군 일원
 
-var baseLayers = {
-    'VWorld 일반': L.tileLayer('https://xdworld.vworld.kr/2d/Base/service/{z}/{x}/{y}.png',
-        { maxZoom: 19, attribution: 'VWorld' }),
-    'VWorld 위성': L.tileLayer('https://xdworld.vworld.kr/2d/Satellite/service/{z}/{x}/{y}.jpeg',
-        { maxZoom: 19, attribution: 'VWorld' }),
-    'OpenStreetMap': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png',
-        { maxZoom: 19, attribution: '&copy; OpenStreetMap' })
-};
-baseLayers['VWorld 일반'].addTo(map);
-L.control.layers(baseLayers, null, { position: 'bottomright' }).addTo(map);
-
-/* VWorld 타일이 막히면 OSM으로 자동 전환 */
-(function () {
-    var errs = 0, vw = baseLayers['VWorld 일반'];
-    vw.on('tileerror', function () {
-        if (++errs === 6 && map.hasLayer(vw)) {
-            map.removeLayer(vw);
-            baseLayers['OpenStreetMap'].addTo(map);
-            setStatus('err', '⚠ VWorld 배경지도 접속 실패 — OSM으로 전환');
-        }
-    });
-})();
+var kbase = null;   // 카카오 배경지도 컨트롤러 (KakaoBase.init 결과)
 
 var markerLayer = L.layerGroup().addTo(map);
 var labelLayer = L.layerGroup().addTo(map);
@@ -858,6 +847,41 @@ function closePanel() {
     document.getElementById('panel-overlay').classList.remove('on');
 }
 
+/* ============================================================
+   13-a. 카카오 배경지도
+   ============================================================ */
+function initBaseMap() {
+    var ctl = document.getElementById('basemap-ctl');
+
+    KakaoBase.ready(function (err) {
+        if (err) {
+            // 배경지도가 없어도 마커·산정·검수는 그대로 쓸 수 있어야 한다
+            document.getElementById('kakao-map').style.background = '#e8edf2';
+            ctl.style.display = 'none';
+            setStatus('err', '⚠ ' + err.message);
+            return;
+        }
+
+        kbase = KakaoBase.init(map, { lat: 35.72, mapTypeId: 'ROADMAP' });
+
+        // 카카오 레벨 1~14 에 대응하는 줌 범위로 제한
+        var zr = kbase.zoomRange();
+        map.setMinZoom(zr.min);
+        map.setMaxZoom(zr.max);
+
+        ctl.querySelectorAll('button[data-type]').forEach(function (b) {
+            b.onclick = function () {
+                ctl.querySelectorAll('button[data-type]').forEach(function (o) {
+                    o.classList.toggle('on', o === b);
+                });
+                kbase.setMapType(b.dataset.type);
+            };
+        });
+        var bd = document.getElementById('btn-district');
+        bd.onclick = function () { bd.classList.toggle('on', kbase.setDistrict(!kbase.districtOn())); };
+    });
+}
+
 function init() {
     document.getElementById('hdr-region').textContent = REGION + ' 표준지 · 공시지가 검토 GIS';
 
@@ -939,11 +963,15 @@ function init() {
     });
 
     /* 폰트·레이아웃이 늦게 확정되는 경우 대비 */
-    window.addEventListener('load', function () { map.invalidateSize(false); });
+    window.addEventListener('load', function () {
+        map.invalidateSize(false);
+        if (kbase) kbase.relayout();
+    });
 
     wireGeo();
     geoSummary();
     applyFilter();
+    initBaseMap();
 
     if (recs.some(function (r) { return r.lat; })) fitToData();
 }
@@ -954,6 +982,7 @@ init();
    예) __gis.recs.filter(r => r.flagged).length */
 window.__gis = {
     map: map, recs: recs, byKey: byKey, state: state,
+    kbase: function () { return kbase; },
     filtered: function () { return filtered; },
     select: select, refresh: applyFilter, fit: fitToData
 };

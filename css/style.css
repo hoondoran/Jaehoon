@@ -53,8 +53,25 @@ html,body{width:100%;height:100%;overflow:hidden;
     color:var(--ink-1);background:var(--surface-2);}
 button,input,select,textarea{font-family:inherit}
 
-/* ===== 지도 ===== */
-#map{position:absolute;top:0;right:0;bottom:0;left:340px;width:calc(100% - 340px);z-index:1;background:#eef2f6}
+/* ===== 지도 =====
+   #kakao-map 이 배경(카카오), #map 이 그 위의 투명한 Leaflet 오버레이.
+   두 요소는 반드시 같은 위치·크기여야 한다. */
+#kakao-map,#map{position:absolute;top:0;right:0;bottom:0;left:340px;width:calc(100% - 340px)}
+#kakao-map{z-index:0;background:#eef2f6}
+#map{z-index:1;background:transparent}
+/* 배경이 카카오이므로 Leaflet 쪽 배경/타일 영역은 비워 둔다 */
+.leaflet-container{background:transparent}
+
+/* ===== 배경지도 전환 ===== */
+#basemap-ctl{position:absolute;right:12px;bottom:18px;z-index:1200;display:flex;gap:4px;
+    background:rgba(255,255,255,.96);border:1px solid var(--line);border-radius:9px;padding:4px;
+    box-shadow:0 4px 16px rgba(0,0,0,.14)}
+#basemap-ctl button{font-size:11px;font-weight:700;color:var(--ink-2);background:#fff;
+    border:1px solid transparent;border-radius:6px;padding:5px 10px;cursor:pointer}
+#basemap-ctl button:hover{background:#f0f7ff;color:var(--brand-500)}
+#basemap-ctl button.on{background:var(--brand-500);color:#fff}
+#basemap-ctl #btn-district{margin-left:4px;border-left:1px solid var(--line-soft);border-radius:0 6px 6px 0}
+#basemap-ctl #btn-district.on{background:var(--warning);color:#3d2c00}
 
 /* ===== 사이드 패널 ===== */
 #side-panel{position:fixed;top:0;left:0;width:340px;height:100%;background:var(--surface-1);
@@ -248,8 +265,9 @@ textarea.memo:focus{border-color:var(--brand-500)}
     font-size:13px;font-weight:700;box-shadow:0 4px 14px rgba(0,0,0,.25);cursor:pointer}
 #panel-overlay{display:none;position:fixed;inset:0;background:rgba(0,0,0,.4);z-index:2900}
 @media (max-width:820px){
-    #map{left:0;width:100%}
+    #kakao-map,#map{left:0;width:100%}
     #legend{left:12px;bottom:74px}
+    #basemap-ctl{bottom:74px}
     #side-panel{transform:translateX(-100%);transition:transform .25s}
     #side-panel.open{transform:translateX(0)}
     #mobile-toggle{display:block}

@@ -59,7 +59,16 @@
 </div>
 
 <!-- ============================ 지도 ============================ -->
+<!-- 아래: 카카오 배경지도 / 위: 투명한 Leaflet 오버레이 (마커·히트맵) -->
+<div id="kakao-map"></div>
 <div id="map"></div>
+
+<div id="basemap-ctl">
+    <button data-type="ROADMAP" class="on">일반</button>
+    <button data-type="SKYVIEW">위성</button>
+    <button data-type="HYBRID">하이브리드</button>
+    <button id="btn-district" title="용도지역 지적편집도">지적</button>
+</div>
 
 <div id="toolbar">
     <button id="btn-calc">🧮 산정</button>
@@ -126,12 +135,13 @@
 <!-- ============================ 스크립트 ============================ -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://unpkg.com/leaflet.heat@0.2.0/dist/leaflet-heat.js"></script>
-<!-- 카카오 지도 SDK: 지오코딩(주소→좌표) 전용. 배경지도는 Leaflet 타일 사용 -->
+<!-- 카카오 지도 SDK: 배경지도 + 지오코딩(주소→좌표) -->
 <script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=9185cfe0d3dcbd94326f64f4338462f1&libraries=services&autoload=false"></script>
 
 <script src="data/parcels.js"></script>
 <script src="data/coords.js"></script>
 <script src="js/appraise.js"></script>
+<script src="js/kakao_base.js"></script>
 <script src="js/geocode.js"></script>
 <script src="js/app.js"></script>
 </body>
