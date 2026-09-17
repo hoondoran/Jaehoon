@@ -53,9 +53,19 @@
     </div>
 
     <div class="filter-section">
+        <label>현장조사 일차 <span id="day-hint" class="sub-hint"></span></label>
+        <div class="filter-row" id="f-day"></div>
+        <div class="btn-line" style="margin-top:8px;">
+            <button id="btn-day-plan">🗺 일차 계획</button>
+            <button id="btn-day-csv">⬇ 조사순서 CSV</button>
+        </div>
+    </div>
+
+    <div class="filter-section">
         <label>지도 색상 기준</label>
         <select class="sel" id="f-metric">
             <option value="price">공시지가 (원/㎡)</option>
+            <option value="day">현장조사 일차 (1~10일)</option>
             <option value="chg">전년 대비 증감률 (%)</option>
             <option value="mkt">시가수준 (원/㎡)</option>
             <option value="r27">&#39;27 반영률 (%)</option>
@@ -153,6 +163,7 @@
 <script src="data/coords.js"></script>
 <script src="data/shapes.js"></script>
 <script src="js/appraise.js"></script>
+<script src="js/route.js"></script>
 <script src="js/kakao_base.js"></script>
 <script src="js/geocode.js"></script>
 <script src="js/app.js"></script>

@@ -11,7 +11,7 @@
    캐시 이름의 VERSION 을 올리면 옛 캐시는 activate 에서 정리된다.
    ============================================================ */
 
-var VERSION = 'v3';
+var VERSION = 'v4';
 var SHELL_CACHE = 'gongsi-shell-' + VERSION;
 var TILE_CACHE  = 'gongsi-tiles-' + VERSION;
 var TILE_LIMIT  = 900;          // 타일 캐시 최대 건수
@@ -112,8 +112,14 @@ self.addEventListener('fetch', function (e) {
         return;
     }
 
-    /* 2) 문서 — 네트워크 우선 (갱신 반영), 실패하면 캐시 */
-    if (req.mode === 'navigate' || /\.html($|\?)/.test(url)) {
+    /* 2) 문서와 앱 코드 — 네트워크 우선, 실패하면 캐시.
+          js/ · css/ 를 캐시 우선으로 두면 배포 후에도 한 번은 옛 코드가 실행된다.
+          둘 다 수십 KB라 온라인에서는 지연이 거의 없고, 오프라인이면 캐시로 떨어진다.
+          반면 data/ 는 크고 거의 바뀌지 않으므로 아래 3) 의 캐시 우선을 그대로 쓴다. */
+    var sameOrigin = url.indexOf(self.registration.scope) === 0;
+    var isAppCode = sameOrigin && /\/(js|css)\/[^/]+\.(js|css)($|\?)/.test(url);
+
+    if (req.mode === 'navigate' || /\.html($|\?)/.test(url) || isAppCode) {
         e.respondWith(
             fetch(req).then(function (res) {
                 var copy = res.clone();
@@ -121,7 +127,14 @@ self.addEventListener('fetch', function (e) {
                 return res;
             }).catch(function () {
                 return caches.match(req).then(function (hit) {
-                    return hit || caches.match('./index.html') || caches.match('./');
+                    if (hit) return hit;
+                    // 문서 요청이면 앱 셸로 떨어뜨린다 (앱 코드면 그냥 실패)
+                    if (req.mode === 'navigate') {
+                        return caches.match('./index.html').then(function (h2) {
+                            return h2 || caches.match('./');
+                        });
+                    }
+                    return Response.error();
                 });
             })
         );
