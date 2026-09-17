@@ -85,6 +85,52 @@ OFFSET이 정수가 아니라 Leaflet 줌도 정수가 아닙니다. `zoomSnap:0
 
 ---
 
+## 모바일 (갤럭시 · 안드로이드)
+
+현장 조사용으로 **통신이 끊겨도 동작**합니다. 로컬 서버를 내린 상태에서 1,043필지·검수
+판정·카카오 타일까지 그대로 표시되는 것을 확인했습니다.
+
+### ① 홈 화면 설치 (PWA — 설치 파일 불필요)
+
+갤럭시 크롬으로 <https://hoondoran.github.io/Jaehoon/> 접속 →
+메뉴(⋮) → **홈 화면에 추가**. 주소창 없는 전체화면으로 뜨고, 아이콘을 길게 누르면
+**검수 / 통계** 바로가기가 나옵니다.
+
+첫 접속 때 앱 셸(HTML·CSS·JS·표준지 데이터 443KB)을 통째로 받아 두고,
+이후 둘러본 지도 타일은 최대 900장까지 캐시합니다. 현장 나가기 전에 담당 구역을
+한 번 훑어 두면 그 범위는 오프라인에서도 지도가 보입니다.
+
+### ② APK 설치 (앱으로 설치)
+
+이 PC에는 JDK·Android SDK가 없어 **GitHub Actions에서 빌드**합니다. 설치할 것 없습니다.
+
+1. 저장소 **Actions** 탭 → **APK 빌드** → `Run workflow`
+   (`android/` 아래를 고치면 자동으로도 돕니다)
+2. 실행 결과 페이지 하단 **Artifacts → `gongsi-gis-apk`** 내려받기 (zip)
+3. 압축을 풀어 나온 `.apk`를 갤럭시로 옮겨 실행
+4. "출처를 알 수 없는 앱" 설치 허용
+
+`v1.0` 같은 태그를 밀면 **Release에 APK가 자동 첨부**됩니다.
+
+```bash
+git tag v1.0 && git push origin v1.0
+```
+
+> **디버그 서명 APK입니다.** 사내 사이드로드용이고 Play 스토어 배포용이 아닙니다.
+> 스토어에 올리려면 릴리스 키스토어를 만들어 저장소 Secret으로 넣고 서명 단계를
+> 추가해야 합니다.
+
+`android/` 는 배포된 PWA를 띄우는 **WebView 래퍼**입니다. 앱 안에 웹 파일을 번들하지
+않고 원격 URL을 여는 이유는, 카카오 지도 SDK가 **등록된 도메인에서만 동작**하기
+때문입니다(`file://` 로 열면 SDK가 거부합니다). 오프라인은 페이지의 서비스워커가
+담당하고, 앱은 그 위에서 뒤로가기·위치권한·파일 저장만 처리합니다.
+
+CSV 내보내기는 `Blob` URL을 쓰는데 WebView의 `DownloadListener`가 `blob:` 을 받지
+못합니다. 그래서 페이지 안에서 base64로 읽어 JS 브리지로 넘긴 뒤 앱이 파일로 씁니다
+(`Android/data/kr.gongsi.gis/files/Download/`).
+
+---
+
 ## 산정 모델 — 엑셀에서 역산해 검증한 관계식
 
 1,043행 전체에 대해 아래 식이 **100% 일치**함을 확인하고 그대로 구현했습니다
@@ -183,6 +229,12 @@ data/coords.js             PNU → 좌표 캐시 (자동 생성, 1,043필지 채
 data/shapes.js             PNU → 필지 외곽선 (외부 지적자료 필요, 비어 있으면 생략)
 tools/build_parcels.ps1    표본목록.xls → data/parcels.js 재생성
 tools/serve.ps1            의존성 없는 로컬 정적 서버
+tools/make_icons.ps1       앱 아이콘 생성 (PWA · 안드로이드 런처)
+manifest.webmanifest       PWA 설치 정보
+sw.js                      서비스워커 (오프라인 캐시)
+icons/                     앱 아이콘
+android/                   안드로이드 WebView 래퍼 (APK)
+.github/workflows/         CI — APK 빌드
 표본목록.xls               원본 데이터
 KakaoTalk_Longtxt_*.txt    참고한 유사 프로젝트(은행 지점 지도) 원문
 ```
