@@ -33,8 +33,14 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Android SDK 설치
-        uses: android-actions/setup-android@v3
+      # ubuntu-latest 러너 이미지에는 Android SDK 가 이미 설치돼 있고
+      # 라이선스도 수락된 상태라 별도 설치 액션을 쓰지 않는다.
+      - name: Android SDK 확인
+        run: |
+          echo "ANDROID_HOME=$ANDROID_HOME"
+          echo "ANDROID_SDK_ROOT=$ANDROID_SDK_ROOT"
+          ls "$ANDROID_HOME/platforms" || true
+          ls "$ANDROID_HOME/build-tools" || true
 
       # gradle-wrapper.jar 를 저장소에 두지 않으려고 Gradle 을 직접 설치해 쓴다
       # (AGP 8.5.2 는 Gradle 8.7 이상 필요)
