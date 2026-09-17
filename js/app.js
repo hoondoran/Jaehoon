@@ -862,12 +862,8 @@ function initBaseMap() {
             return;
         }
 
+        // 줌 범위(카카오 레벨 1~14)는 kakao_base 가 보정 후 직접 반영한다
         kbase = KakaoBase.init(map, { lat: 35.72, mapTypeId: 'ROADMAP' });
-
-        // 카카오 레벨 1~14 에 대응하는 줌 범위로 제한
-        var zr = kbase.zoomRange();
-        map.setMinZoom(zr.min);
-        map.setMaxZoom(zr.max);
 
         ctl.querySelectorAll('button[data-type]').forEach(function (b) {
             b.onclick = function () {

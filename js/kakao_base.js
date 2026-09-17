@@ -26,9 +26,26 @@ var BASE_RES = 0.25;              // 카카오 level 1 해상도 (m/px)
 var WEB_RES  = 156543.03392;      // 웹메르카토르 zoom 0 적도 해상도 (m/px)
 var MIN_LEVEL = 1, MAX_LEVEL = 14;
 
-/** 해당 위도에서의 zoom↔level 오프셋 */
+/** 해당 위도에서의 zoom↔level 오프셋 (이론값, 보정 전 초기치) */
 function zoomOffset(lat) {
     return Math.log(WEB_RES * Math.cos(lat * Math.PI / 180) / (BASE_RES / 2)) / Math.LN2;
+}
+
+/**
+ * 실측 보정 — 이론값만 쓰면 스케일이 약 1.5% 어긋난다(검증으로 확인).
+ * 카카오 지도가 실제로 잡은 경도폭과 Leaflet 의 경도폭을 같게 만드는 OFFSET 을 역산한다.
+ *
+ * Leaflet(EPSG:3857) 에서 폭 px 픽셀에 담기는 경도폭 = px × 360 / (256 × 2^z)
+ * 이 식은 위도와 무관하므로 cos(위도) 가정이 필요 없다.
+ *   → z = log2( px × 360 / (256 × 카카오경도폭) ),  OFFSET = z + level
+ */
+function calibrate(kmap, widthPx, level) {
+    if (!widthPx) return null;
+    var b = kmap.getBounds();
+    if (!b) return null;
+    var span = b.getNorthEast().getLng() - b.getSouthWest().getLng();
+    if (!(span > 0)) return null;
+    return Math.log(widthPx * 360 / (256 * span)) / Math.LN2 + level;
 }
 
 /* ---------- SDK 로딩 ---------- */
@@ -110,10 +127,43 @@ function initKakaoBaseMap(leafletMap, opts) {
     leafletMap.on('zoomend', function () { if (!snapIfNeeded()) sync(); });
     leafletMap.on('resize', function () { kmap.relayout(); sync(); });
 
+    /* 레이아웃이 잡힌 뒤 실측으로 OFFSET 을 보정한다.
+       이론값과 크게 다르면(±0.5 초과) 측정이 잘못된 것으로 보고 무시한다. */
+    var calibrated = false;
+    function tryCalibrate() {
+        if (calibrated) return true;
+        var w = el.clientWidth;
+        if (!w) return false;
+        var m = calibrate(kmap, w, kmap.getLevel());
+        if (m === null || Math.abs(m - OFFSET) > 0.5) return false;
+        OFFSET = m;
+        calibrated = true;
+        applyZoomLimits();
+        snapIfNeeded();
+        sync();
+        return true;
+    }
+
+    /** 카카오 레벨 1~14 에 대응하는 줌 범위를 Leaflet 에 반영 */
+    function applyZoomLimits() {
+        leafletMap.setMinZoom(zoomOf(MAX_LEVEL));
+        leafletMap.setMaxZoom(zoomOf(MIN_LEVEL));
+    }
+    applyZoomLimits();
+
     // 시작 줌도 격자에 맞춘다
     snapIfNeeded();
     sync();
-    setTimeout(function () { kmap.relayout(); sync(); }, 0);
+    setTimeout(function () {
+        kmap.relayout();
+        sync();
+        // 컨테이너 크기가 늦게 잡히는 환경 대비 — 최대 5초간 재시도
+        var t = 0;
+        (function retry() {
+            if (tryCalibrate() || t++ > 50) return;
+            setTimeout(retry, 100);
+        })();
+    }, 0);
 
     /* ---------- 컨트롤러 ---------- */
 
@@ -121,7 +171,9 @@ function initKakaoBaseMap(leafletMap, opts) {
 
     return {
         kakaoMap: kmap,
-        offset: OFFSET,
+        /** 보정 후 값이 바뀌므로 스냅샷이 아닌 함수로 준다 */
+        getOffset: function () { return OFFSET; },
+        isCalibrated: function () { return calibrated; },
         levelOf: levelOf,
         zoomOf: zoomOf,
         snap: snap,
