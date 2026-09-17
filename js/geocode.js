@@ -50,7 +50,12 @@ var geocoder = null, sdkReady = false;
 function ready(cb) {
     if (sdkReady) { cb(null); return; }
     if (!global.kakao || !global.kakao.maps) {
-        cb(new Error('카카오 지도 SDK를 불러오지 못했습니다. 네트워크 또는 appkey 도메인 등록을 확인하세요.'));
+        // SDK 스크립트 자체가 실행되지 않은 상태.
+        // 흔한 원인은 앱의 카카오맵(OPEN_MAP_AND_LOCAL) 서비스가 꺼져 있는 경우로,
+        // 이때 SDK URL은 JS 대신 NotAuthorizedError JSON을 돌려준다.
+        cb(new Error('카카오 지도 SDK가 로드되지 않았습니다. 개발자 콘솔 → 내 애플리케이션 → '
+            + '제품 설정 → 카카오맵이 [활성화 ON] 인지, 플랫폼 → Web 에 ' + location.origin
+            + ' 이(가) 등록돼 있는지 확인하세요. SDK 주소를 브라우저에 직접 열어보면 원인이 JSON으로 나옵니다.'));
         return;
     }
     global.kakao.maps.load(function () {
