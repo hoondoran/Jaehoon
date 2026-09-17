@@ -33,7 +33,12 @@ powershell -ExecutionPolicy Bypass -File tools/serve.ps1
 > **appkey 도메인 등록이 필요합니다.**
 > [카카오 개발자 콘솔](https://developers.kakao.com) → 내 애플리케이션 → 플랫폼 → Web 에
 > `http://localhost:8080` 과 GitHub Pages 주소(`https://<계정>.github.io`)를 등록하세요.
-> 등록되지 않은 도메인에서는 SDK가 로드되지 않고 상단에 오류 메시지가 표시됩니다.
+>
+> 등록되지 않은 도메인에서도 **SDK 스크립트 자체는 정상 로드됩니다.** 거부되는 것은
+> 주소 검색(`addressSearch`) 호출이고, 이때 카카오는 "결과 없음"이 아니라 오류를 돌려줍니다.
+> 그래서 겉보기에는 "변환은 도는데 전부 실패"처럼 보입니다. 이 경우를 구분하려고
+> 초반 5회가 모두 거부되면 즉시 중단하고 등록해야 할 origin을 그대로 찍어 줍니다.
+>
 > appkey는 `index.html` 하단 스크립트 태그에서 바꿉니다.
 
 **② 좌표 CSV 가져오기 (대체)**

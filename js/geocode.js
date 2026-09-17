@@ -64,13 +64,23 @@ function ready(cb) {
     });
 }
 
+/**
+ * 주소 1건 조회.
+ * 반환: { pt:[위도,경도] } | { empty:true } | { hardError:true }
+ *
+ * 카카오는 "결과 없음"(ZERO_RESULT)과 "호출 거부"(도메인 미등록 등)를 구분한다.
+ * 후자는 주소를 바꿔 재시도해도 소용없으므로 따로 구분해서 올린다.
+ */
 function search(query) {
     return new Promise(function (resolve) {
+        var S = kakao.maps.services.Status;
         geocoder.addressSearch(query, function (res, status) {
-            if (status === kakao.maps.services.Status.OK && res && res.length) {
-                resolve([parseFloat(res[0].y), parseFloat(res[0].x)]);
+            if (status === S.OK && res && res.length) {
+                resolve({ pt: [parseFloat(res[0].y), parseFloat(res[0].x)] });
+            } else if (status === S.ZERO_RESULT) {
+                resolve({ empty: true });
             } else {
-                resolve(null);
+                resolve({ hardError: true });
             }
         });
     });
@@ -107,7 +117,18 @@ function run(opts) {
         if (err) { opts.onError && opts.onError(err); return; }
         running = true; stopFlag = false;
         var cache = loadCache();
-        var i = 0, ok = 0, fail = 0;
+        var i = 0, ok = 0, fail = 0, hardErrors = 0;
+
+        /* 초반 호출이 전부 거부되면 주소 문제가 아니라 설정 문제다. 계속 돌릴 이유가 없다. */
+        function abortOnDomainError() {
+            running = false;
+            saveCache(cache);
+            opts.onError && opts.onError(new Error(
+                '카카오 주소 검색이 거부되었습니다. appkey의 Web 플랫폼에 '
+                + location.origin + ' 이(가) 등록돼 있는지 확인하세요 '
+                + '(개발자 콘솔 → 내 애플리케이션 → 플랫폼 → Web). '
+                + '등록이 어려우면 [⬆ 좌표 CSV]로 좌표를 넣을 수 있습니다.'));
+        }
 
         function step() {
             if (stopFlag || i >= todo.length) {
@@ -126,10 +147,16 @@ function run(opts) {
                     return;
                 }
                 var q = qs[qi++];
-                search(q.s).then(function (pt) {
-                    if (pt) {
-                        r.lat = pt[0]; r.lng = pt[1]; r.geoSrc = q.src;
-                        cache[r.key] = [pt[0], pt[1], q.src];
+                search(q.s).then(function (res) {
+                    if (res.hardError) {
+                        // 아직 한 건도 성공하지 못한 채 거부만 5회 → 설정 문제로 보고 중단
+                        if (++hardErrors >= 5 && ok === 0) { abortOnDomainError(); return; }
+                        setTimeout(tryNext, DELAY_MS);
+                        return;
+                    }
+                    if (res.pt) {
+                        r.lat = res.pt[0]; r.lng = res.pt[1]; r.geoSrc = q.src;
+                        cache[r.key] = [res.pt[0], res.pt[1], q.src];
                         ok++; i++;
                         if (ok % 25 === 0) saveCache(cache);   // 중간 저장
                         opts.onProgress && opts.onProgress(i, todo.length, r);
