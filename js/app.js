@@ -47,12 +47,37 @@ function applyRoadRoutes() {
             var r = byPnu[pnu];
             if (r) { r.day = day; r.seq = i + 1; }
         });
-        var s = dayPlan.filter(function (x) { return x.day === day; })[0];
-        if (s) {
-            s.roadMeters = info.meters;
-            s.roadSeconds = info.seconds;
-            s.roadKm = info.meters / 1000;
-        }
+    });
+    rebuildDaySummary();
+}
+
+/* roads.js 는 일차 배정 자체를 담고 있어서(order 의 PNU 가 그 일차 소속)
+   직선 계획으로 만든 요약과 어긋날 수 있다. 실제 레코드에서 다시 만든다. */
+function rebuildDaySummary() {
+    var g = {};
+    recs.forEach(function (r) {
+        if (!r.day) return;
+        (g[r.day] || (g[r.day] = [])).push(r);
+    });
+    dayPlan = Object.keys(g).map(Number).sort(function (a, b) { return a - b; }).map(function (d) {
+        var list = g[d];
+        var prices = list.map(function (r) { return r.price; })
+                         .filter(function (p) { return p > 0; })
+                         .sort(function (a, b) { return a - b; });
+        var info = window.ROAD_ROUTES ? window.ROAD_ROUTES[String(d)] : null;
+        var prev = dayPlan.filter(function (x) { return x.day === d; })[0] || {};
+        return {
+            day: d,
+            n: list.length,
+            km: prev.km || 0,                      // 직선 기준 (참고용)
+            roadMeters: info ? info.meters : undefined,
+            roadSeconds: info ? info.seconds : undefined,
+            roadKm: info ? info.meters / 1000 : undefined,
+            area: list.reduce(function (s, r) { return s + r.area; }, 0),
+            medianPrice: prices.length ? prices[Math.floor(prices.length / 2)] : 0,
+            lat: list.reduce(function (s, r) { return s + r.lat; }, 0) / list.length,
+            lng: list.reduce(function (s, r) { return s + r.lng; }, 0) / list.length
+        };
     });
 }
 
@@ -1291,9 +1316,10 @@ function init() {
         prog.classList.add('on');
         setStatus('pending', '🚗 도로 경로 계산 시작 (수 분 걸립니다)');
 
-        window.RoadPlan.planRoads(recs, PLAN_DAYS, {
+        window.RoadPlan.planAllByRoad(recs, PLAN_DAYS, {
+            iters: 6,
             onProgress: function (msg, done, total) {
-                bar.style.width = (100 * done / total) + '%';
+                bar.style.width = (100 * done / Math.max(total, 1)) + '%';
                 setStatus('pending', '🚗 ' + msg);
             }
         }).then(function (planObj) {
