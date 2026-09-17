@@ -16,9 +16,10 @@ Node·Python 없이 PowerShell만으로 동작합니다.
 powershell -ExecutionPolicy Bypass -File tools/serve.ps1
 ```
 
-브라우저에서 <http://localhost:8080> 접속 → 좌측 상단 **📍 좌표 변환** 1회 실행 →
-끝나면 **⬇ coords.js 저장** 을 눌러 받은 파일로 `data/coords.js` 를 덮어씁니다.
-이후로는 지오코딩 없이 즉시 지도가 뜹니다.
+브라우저에서 <http://localhost:8080> 접속. **좌표는 이미 `data/coords.js` 에 들어 있어
+(1,043필지 전부) 지오코딩 없이 바로 지도가 뜹니다.**
+
+배포본: <https://hoondoran.github.io/Jaehoon/>
 
 ---
 
@@ -26,9 +27,18 @@ powershell -ExecutionPolicy Bypass -File tools/serve.ps1
 
 엑셀에는 좌표 열이 없고 지번주소와 PNU만 있습니다. 두 가지 경로를 지원합니다.
 
-**① 카카오 지오코딩 (기본)**
+**① 카카오 지오코딩 (기본 · 실행 완료)**
 `대구광역시 달성군` + G열 지번주소로 조회하고, 실패하면 도로명주소 → 본번만 순으로
-재시도합니다. 결과는 브라우저 `localStorage` 에 캐시되고 `data/coords.js` 로 내보낼 수 있습니다.
+재시도합니다. 결과는 브라우저 `localStorage` 에 캐시되고 `data/coords.js` 로 내보냅니다.
+
+> **1,043필지 전부 변환 완료 (실패 0건).** 전 건이 1순위인 지번주소로 직접 매칭돼
+> 도로명·본번 대체 경로는 쓰이지 않았습니다. 중복 좌표 0건, 전 필지가 달성군 경계
+> (위도 35.716~35.819 / 경도 128.392~128.547) 안에 들어옵니다.
+>
+> 엑셀에 필지가 추가됐을 때만 **📍 좌표 변환**을 다시 돌리면 됩니다. 이미 좌표가 있는
+> 필지는 건너뛰므로 추가분만 조회합니다. 끝나고 **⬇ coords.js 저장**을 누르면,
+> `tools/serve.ps1` 로 띄운 로컬 서버에서는 `data/coords.js` 를 곧바로 덮어쓰고
+> (개발 전용 `POST /__save-coords`), 그 외 환경에서는 파일 다운로드로 넘어갑니다.
 
 > **appkey 도메인 등록이 필요합니다.**
 > [카카오 개발자 콘솔](https://developers.kakao.com) → 내 애플리케이션 → 플랫폼 → Web 에

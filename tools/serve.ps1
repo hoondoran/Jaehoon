@@ -46,6 +46,28 @@ try {
         try {
             $rel = [System.Uri]::UnescapeDataString($req.Url.AbsolutePath).TrimStart('/')
             if ([string]::IsNullOrWhiteSpace($rel)) { $rel = 'index.html' }
+
+            # --- 개발용 저장 엔드포인트 -------------------------------------
+            # 페이지의 "coords.js 저장" 이 data/coords.js 를 바로 덮어쓸 수 있게 한다.
+            # 로컬 전용 서버이고, 쓰기 대상은 이 한 파일로 고정한다.
+            if ($req.HttpMethod -eq 'POST' -and $rel -eq '__save-coords') {
+                $reader = New-Object System.IO.StreamReader($req.InputStream, [System.Text.Encoding]::UTF8)
+                $body = $reader.ReadToEnd()
+                $reader.Close()
+                if ($body.Length -gt 5MB) { throw "본문이 너무 큽니다 ($($body.Length) bytes)" }
+                if ($body -notmatch 'var PARCEL_COORDS') { throw "coords.js 형식이 아닙니다" }
+                $target = Join-Path $Root 'data\coords.js'
+                [System.IO.File]::WriteAllText($target, $body, (New-Object System.Text.UTF8Encoding $false))
+                $res.StatusCode = 200
+                $res.ContentType = 'application/json; charset=utf-8'
+                $ok = [System.Text.Encoding]::UTF8.GetBytes('{"ok":true,"bytes":' + $body.Length + '}')
+                $res.OutputStream.Write($ok, 0, $ok.Length)
+                Write-Host ("SAVE data/coords.js ({0} bytes)" -f $body.Length)
+                $rel = $null      # 정적 파일 처리를 건너뛴다
+            }
+
+            if ($null -ne $rel) {
+
             $full = Join-Path $Root $rel
 
             # 루트 밖 경로 차단
@@ -67,6 +89,8 @@ try {
                 $res.OutputStream.Write($b, 0, $b.Length)
                 Write-Host ("404 {0}" -f $rel)
             }
+
+            }   # if ($null -ne $rel)
         } catch {
             $res.StatusCode = 500
             $b = [System.Text.Encoding]::UTF8.GetBytes("500 " + $_.Exception.Message)

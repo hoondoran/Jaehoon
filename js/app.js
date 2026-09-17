@@ -756,8 +756,16 @@ function wireGeo() {
     bExp.onclick = function () {
         var n = recs.filter(function (r) { return r.lat; }).length;
         if (!n) { setStatus('err', '⚠ 저장할 좌표가 없습니다. 먼저 좌표 변환을 실행하세요.'); return; }
-        window.Geo.download(recs);
-        setStatus('ok', '⬇ coords.js 내려받음 (' + n.toLocaleString('ko-KR') + '건) — data/ 폴더에 덮어쓰세요');
+        setStatus('pending', '💾 저장 중…');
+        // 로컬 개발서버면 data/coords.js 를 바로 덮어쓰고, 아니면 다운로드로 넘어간다
+        window.Geo.saveToServer(recs).then(function (bytes) {
+            setStatus('ok', '✓ data/coords.js 저장됨 (' + n.toLocaleString('ko-KR') + '건, '
+                + Math.round(bytes / 1024) + 'KB) — 커밋하면 배포본에 반영됩니다');
+        }).catch(function () {
+            window.Geo.download(recs);
+            setStatus('ok', '⬇ coords.js 내려받음 (' + n.toLocaleString('ko-KR')
+                + '건) — data/ 폴더에 덮어쓰세요');
+        });
     };
 }
 

@@ -197,6 +197,25 @@ function serialize(recs) {
         + 'var PARCEL_COORDS = {\n' + lines.join(',\n') + '\n};\n';
 }
 
+/**
+ * tools/serve.ps1 로 띄운 로컬 개발서버라면 data/coords.js 를 바로 덮어쓴다.
+ * (GitHub Pages 등 정적 호스팅에서는 실패하므로 호출부에서 다운로드로 넘어간다)
+ * 반환: Promise<bytes>
+ */
+function saveToServer(recs) {
+    return fetch('__save-coords', {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+        body: serialize(recs)
+    }).then(function (r) {
+        if (!r.ok) throw new Error('HTTP ' + r.status);
+        return r.json();
+    }).then(function (j) {
+        if (!j.ok) throw new Error('저장 실패');
+        return j.bytes;
+    });
+}
+
 function download(recs) {
     var blob = new Blob([serialize(recs)], { type: 'text/javascript;charset=utf-8' });
     var a = document.createElement('a');
@@ -273,8 +292,8 @@ function importCsv(text, recs) {
 
 global.Geo = {
     hydrate: hydrate, run: run, stop: stop, isRunning: isRunning,
-    serialize: serialize, download: download, clearCache: clearCache,
-    importCsv: importCsv
+    serialize: serialize, download: download, saveToServer: saveToServer,
+    clearCache: clearCache, importCsv: importCsv
 };
 
 })(window);
