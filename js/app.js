@@ -923,12 +923,25 @@ function tryFit() {
     if (!pts.length) { pendingFit = false; return; }
     map.fitBounds(pts, { padding: [40, 40] });
     pendingFit = false;
+    // fitBounds 가 줌을 바꾸지 않으면 zoomend 가 오지 않는다.
+    // 라벨은 화면 크기를 알아야 배치되므로 여기서 직접 다시 그린다.
+    renderLabels();
+    renderShape();
 }
 
+/* 컨테이너 크기가 늦게 잡히는 환경(숨은 탭·임베디드 뷰)에서는 최초 렌더 때
+   getSize() 가 0 이라 라벨이 하나도 배치되지 않는다. 크기가 잡히면 다시 그린다. */
 if (window.ResizeObserver) {
+    var lastW = 0, lastH = 0;
     new ResizeObserver(function () {
         map.invalidateSize(false);
         tryFit();
+        var s = map.getSize();
+        if (s.x && s.y && (s.x !== lastW || s.y !== lastH)) {
+            lastW = s.x; lastH = s.y;
+            renderLabels();
+            renderShape();
+        }
     }).observe(document.getElementById('map'));
 }
 
