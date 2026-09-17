@@ -11,7 +11,7 @@
    캐시 이름의 VERSION 을 올리면 옛 캐시는 activate 에서 정리된다.
    ============================================================ */
 
-var VERSION = 'v4';
+var VERSION = 'v5';
 var SHELL_CACHE = 'gongsi-shell-' + VERSION;
 var TILE_CACHE  = 'gongsi-tiles-' + VERSION;
 var TILE_LIMIT  = 900;          // 타일 캐시 최대 건수
@@ -21,12 +21,15 @@ var SHELL = [
     './index.html',
     './css/style.css',
     './js/appraise.js',
+    './js/route.js',
+    './js/roadplan.js',
     './js/kakao_base.js',
     './js/geocode.js',
     './js/app.js',
     './data/parcels.js',
     './data/coords.js',
     './data/shapes.js',
+    './data/roads.js',
     './manifest.webmanifest',
     './icons/icon-192.png',
     './icons/icon-512.png',

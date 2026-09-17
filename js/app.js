@@ -25,8 +25,37 @@ var dayPlan = [];      // Route.plan 의 일차별 요약
 
 function replan() {
     dayPlan = window.Route.plan(recs, PLAN_DAYS);
+    applyRoadRoutes();
     return dayPlan;
 }
+
+/* data/roads.js 가 있으면 도로 기준 순서로 덮어쓴다.
+   직선 순서는 강·고속도로로 막힌 구간을 무시해 실제 주행이 크게 늘어난다. */
+function hasRoads() {
+    return !!(window.ROAD_ROUTES && Object.keys(window.ROAD_ROUTES).length);
+}
+
+function applyRoadRoutes() {
+    if (!hasRoads()) return;
+    var byPnu = {};
+    recs.forEach(function (r) { byPnu[r.pnu] = r; });
+
+    Object.keys(window.ROAD_ROUTES).forEach(function (dk) {
+        var info = window.ROAD_ROUTES[dk], day = Number(dk);
+        if (!info || !info.order) return;
+        info.order.forEach(function (pnu, i) {
+            var r = byPnu[pnu];
+            if (r) { r.day = day; r.seq = i + 1; }
+        });
+        var s = dayPlan.filter(function (x) { return x.day === day; })[0];
+        if (s) {
+            s.roadMeters = info.meters;
+            s.roadSeconds = info.seconds;
+            s.roadKm = info.meters / 1000;
+        }
+    });
+}
+
 replan();
 
 /* 메모 (localStorage) */
@@ -235,9 +264,19 @@ function renderRoute() {
     if (path.length < 2) return;
 
     var c = DAY_COLORS[Math.min(day, PLAN_DAYS) - 1];
+
+    /* 도로 형상이 있으면 실제 주행 경로를, 없으면 필지를 직선으로 잇는다.
+       직선은 어디까지나 순서 표시용이라는 걸 점선으로 드러낸다. */
+    var info = hasRoads() ? window.ROAD_ROUTES[String(day)] : null;
+    var line = (info && info.geometry) ? window.RoadPlan.decodePolyline(info.geometry) : path;
+    var dashed = !(info && info.geometry);
+
     // 흰 테두리를 깔아 배경지도 위에서도 선이 끊겨 보이지 않게 한다
-    routeLayer.addLayer(L.polyline(path, { color: '#fff', weight: 6, opacity: .85 }));
-    routeLayer.addLayer(L.polyline(path, { color: c, weight: 3, opacity: .95 }));
+    routeLayer.addLayer(L.polyline(line, { color: '#fff', weight: 7, opacity: .85 }));
+    routeLayer.addLayer(L.polyline(line, {
+        color: c, weight: 3.5, opacity: .95,
+        dashArray: dashed ? '6,6' : null
+    }));
 
     // 출발 지점 표시
     routeLayer.addLayer(L.marker(path[0], {
@@ -812,23 +851,38 @@ function renderStats() {
 
     /* 일차별 조사 계획 */
     if (dayPlan.length) {
-        var totKm = dayPlan.reduce(function (s, d) { return s + d.km; }, 0);
+        var road = hasRoads();
+        var totKm = dayPlan.reduce(function (s, d) {
+            return s + (road && d.roadKm ? d.roadKm : d.km);
+        }, 0);
+        var totMin = dayPlan.reduce(function (s, d) { return s + (d.roadSeconds || 0); }, 0) / 60;
+
         h += '<div class="sec"><div class="sec-h">현장조사 일차별 계획 '
-           + '<span style="color:var(--ink-4);font-weight:600">직선 합계 '
-           + totKm.toFixed(0) + 'km</span></div>'
-           + '<table class="cmp"><thead><tr><th>일차</th><th>필지</th><th>이동(직선)</th>'
-           + '<th>중위지가</th><th>면적</th></tr></thead><tbody>';
+           + '<span style="color:var(--ink-4);font-weight:600">'
+           + (road ? '도로' : '직선') + ' 합계 ' + totKm.toFixed(0) + 'km'
+           + (totMin ? ' · 주행 ' + Math.round(totMin) + '분' : '') + '</span></div>'
+           + '<table class="cmp"><thead><tr><th>일차</th><th>필지</th>'
+           + '<th>' + (road ? '주행거리' : '직선거리') + '</th>'
+           + (road ? '<th>주행시간</th>' : '<th>중위지가</th>')
+           + '<th>면적</th></tr></thead><tbody>';
         dayPlan.forEach(function (d) {
             var col = DAY_COLORS[Math.min(d.day, PLAN_DAYS) - 1];
+            var km = (road && d.roadKm) ? d.roadKm : d.km;
             h += '<tr data-day="' + d.day + '"><td>'
                + '<i style="display:inline-block;width:9px;height:9px;border-radius:50%;'
                + 'background:' + col + ';margin-right:5px;"></i>' + d.day + '일차</td>'
-               + '<td>' + d.n + '</td><td>' + d.km.toFixed(1) + 'km</td><td>'
-               + fmtShort(d.medianPrice) + '</td><td>' + fmtShort(d.area) + '㎡</td></tr>';
+               + '<td>' + d.n + '</td><td>' + km.toFixed(1) + 'km</td>'
+               + (road
+                    ? '<td>' + (d.roadSeconds ? Math.round(d.roadSeconds / 60) + '분' : '-') + '</td>'
+                    : '<td>' + fmtShort(d.medianPrice) + '</td>')
+               + '<td>' + fmtShort(d.area) + '㎡</td></tr>';
         });
         h += '</tbody></table>'
            + '<div class="hint">행을 누르면 그 일차만 지도에 표시하고 동선을 그립니다. '
-           + '이동거리는 도로가 아닌 직선거리 합계입니다.</div></div>';
+           + (road
+                ? '실제 도로를 따라 계산한 차량 주행거리이며, 주행시간에 조사 시간은 빠져 있습니다.'
+                : '아직 <b>직선거리</b>입니다 — [🚗 도로 경로 계산]을 돌리면 도로 기준으로 바뀝니다.')
+           + '</div></div>';
     }
 
     h += '<div class="btn-line"><button id="btn-csv" class="primary">⬇ 현재 필터 CSV 내보내기</button></div>';
@@ -1101,14 +1155,21 @@ function renderDayChips() {
         document.getElementById('day-hint').textContent = '';
         return;
     }
-    var totalKm = dayPlan.reduce(function (s, d) { return s + d.km; }, 0);
+    var road = hasRoads();
+    var totalKm = dayPlan.reduce(function (s, d) {
+        return s + (road && d.roadKm ? d.roadKm : d.km);
+    }, 0);
     document.getElementById('day-hint').textContent =
-        '· ' + dayPlan.length + '일 · 직선 합계 ' + totalKm.toFixed(0) + 'km';
+        '· ' + dayPlan.length + '일 · ' + (road ? '도로' : '직선') + ' 합계 '
+        + totalKm.toFixed(0) + 'km';
 
     el.innerHTML = dayPlan.map(function (d) {
         var col = DAY_COLORS[Math.min(d.day, PLAN_DAYS) - 1];
+        var km = (road && d.roadKm) ? d.roadKm : d.km;
+        var tip = d.n + '필지 · ' + (road && d.roadKm ? '도로 ' : '직선 ') + km.toFixed(1) + 'km'
+                + (d.roadSeconds ? ' · 주행 ' + Math.round(d.roadSeconds / 60) + '분' : '');
         return '<span class="chip day-chip" data-v="' + d.day + '" '
-            + 'title="' + d.n + '필지 · 직선 ' + d.km.toFixed(1) + 'km" '
+            + 'title="' + tip + '" '
             + 'style="--day-col:' + col + '">'
             + '<i class="dot"></i>' + d.day + '일차<span class="cnt">' + d.n + '</span></span>';
     }).join('');
@@ -1219,6 +1280,57 @@ function init() {
         applyFilter();
         show('stats-float', true);
     };
+    /* 도로 기준 재계산 — OSRM 으로 거리행렬·경로 형상을 받아 data/roads.js 에 저장.
+       한 번 돌려 저장해 두면 앱은 그 파일만 읽으므로 오프라인에서도 동작한다. */
+    document.getElementById('btn-road-plan').onclick = function () {
+        var btn = this;
+        if (btn.disabled) return;
+        btn.disabled = true;
+        var prog = document.getElementById('geo-progress');
+        var bar = prog.querySelector('i');
+        prog.classList.add('on');
+        setStatus('pending', '🚗 도로 경로 계산 시작 (수 분 걸립니다)');
+
+        window.RoadPlan.planRoads(recs, PLAN_DAYS, {
+            onProgress: function (msg, done, total) {
+                bar.style.width = (100 * done / total) + '%';
+                setStatus('pending', '🚗 ' + msg);
+            }
+        }).then(function (planObj) {
+            window.ROAD_ROUTES = planObj;
+            applyRoadRoutes();
+            renderDayChips();
+            applyFilter();
+
+            var text = window.RoadPlan.serialize(planObj);
+            return fetch('__save-data?f=roads.js', {
+                method: 'POST',
+                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
+                body: text
+            }).then(function (r) {
+                if (!r.ok) throw new Error('HTTP ' + r.status);
+                return r.json();
+            }).then(function (j) {
+                setStatus('ok', '✓ data/roads.js 저장됨 (' + Math.round(j.bytes / 1024)
+                    + 'KB) — 커밋하면 배포본에 반영됩니다');
+            }).catch(function () {
+                // 정적 호스팅이면 저장 엔드포인트가 없다 → 파일로 내려받기
+                var blob = new Blob([text], { type: 'text/javascript;charset=utf-8' });
+                var a = document.createElement('a');
+                a.href = URL.createObjectURL(blob);
+                a.download = 'roads.js';
+                document.body.appendChild(a); a.click();
+                setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
+                setStatus('ok', '⬇ roads.js 내려받음 — data/ 폴더에 덮어쓰세요');
+            });
+        }).catch(function (err) {
+            setStatus('err', '⚠ 도로 경로 계산 실패: ' + err.message);
+        }).then(function () {
+            btn.disabled = false;
+            prog.classList.remove('on');
+        });
+    };
+
     document.getElementById('btn-day-csv').onclick = function () {
         // 조사 순서대로 정렬해 내보낸다
         var list = recs.filter(function (r) { return r.day; }).sort(function (a, b) {

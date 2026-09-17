@@ -48,21 +48,37 @@ try {
             if ([string]::IsNullOrWhiteSpace($rel)) { $rel = 'index.html' }
 
             # --- 개발용 저장 엔드포인트 -------------------------------------
-            # 페이지의 "coords.js 저장" 이 data/coords.js 를 바로 덮어쓸 수 있게 한다.
-            # 로컬 전용 서버이고, 쓰기 대상은 이 한 파일로 고정한다.
-            if ($req.HttpMethod -eq 'POST' -and $rel -eq '__save-coords') {
+            # 페이지의 "coords.js 저장" / "도로 경로 계산" 결과를 data/ 에 바로 쓴다.
+            # 로컬 전용 서버이고, 쓰기 대상은 아래 목록으로 고정한다.
+            #   POST /__save-coords            → data/coords.js
+            #   POST /__save-data?f=roads.js   → data/roads.js
+            $allowed = @{
+                'coords.js' = 'var PARCEL_COORDS'
+                'roads.js'  = 'var ROAD_ROUTES'
+                'shapes.js' = 'var PARCEL_SHAPES'
+            }
+            $saveName = $null
+            if ($req.HttpMethod -eq 'POST' -and $rel -eq '__save-coords') { $saveName = 'coords.js' }
+            if ($req.HttpMethod -eq 'POST' -and $rel -eq '__save-data') {
+                $f = $req.QueryString['f']
+                if ($allowed.ContainsKey($f)) { $saveName = $f } else { throw "허용되지 않는 대상: $f" }
+            }
+
+            if ($saveName) {
                 $reader = New-Object System.IO.StreamReader($req.InputStream, [System.Text.Encoding]::UTF8)
                 $body = $reader.ReadToEnd()
                 $reader.Close()
-                if ($body.Length -gt 5MB) { throw "본문이 너무 큽니다 ($($body.Length) bytes)" }
-                if ($body -notmatch 'var PARCEL_COORDS') { throw "coords.js 형식이 아닙니다" }
-                $target = Join-Path $Root 'data\coords.js'
+                if ($body.Length -gt 20MB) { throw "본문이 너무 큽니다 ($($body.Length) bytes)" }
+                if ($body -notmatch [regex]::Escape($allowed[$saveName])) {
+                    throw "$saveName 형식이 아닙니다"
+                }
+                $target = Join-Path $Root (Join-Path 'data' $saveName)
                 [System.IO.File]::WriteAllText($target, $body, (New-Object System.Text.UTF8Encoding $false))
                 $res.StatusCode = 200
                 $res.ContentType = 'application/json; charset=utf-8'
                 $ok = [System.Text.Encoding]::UTF8.GetBytes('{"ok":true,"bytes":' + $body.Length + '}')
                 $res.OutputStream.Write($ok, 0, $ok.Length)
-                Write-Host ("SAVE data/coords.js ({0} bytes)" -f $body.Length)
+                Write-Host ("SAVE data/{0} ({1} bytes)" -f $saveName, $body.Length)
                 $rel = $null      # 정적 파일 처리를 건너뛴다
             }
 
