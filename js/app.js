@@ -199,7 +199,17 @@ function renderMarkers() {
    1,043개를 전부 띄우면 못 읽으므로 화면 좌표에서 겹치는 것은 버린다.
    우선순위: 선택 필지 → 검수 대상 → 지가 높은 순.                                */
 
-var LBL_W = 152, LBL_H = 58, LBL_OFF = 13, LBL_MAX = 260, LBL_PAD = 3;
+var LBL_OFF = 13, LBL_MAX = 260, LBL_PAD = 3;
+var LBL_W = 152, LBL_H = 58;
+
+/* 라벨 크기는 CSS(.sum-label)와 반드시 같아야 겹침 계산이 맞는다.
+   모바일 폭에서는 CSS 가 라벨을 줄이므로 여기서도 같이 줄인다. */
+function syncLabelMetrics() {
+    var mobile = window.innerWidth <= 820;
+    LBL_W = mobile ? 132 : 152;
+    LBL_H = mobile ? 54 : 58;
+}
+syncLabelMetrics();
 
 function labelHtml(r, isSel) {
     var c = colorOf(r);
@@ -966,6 +976,11 @@ function show(id, on) {
             if (o !== id) show(o, false);
         });
     }
+    // 모바일에서 하단 시트가 열리면 "목록 보기" 버튼이 시트를 가리므로 숨긴다
+    var anyOpen = ['calc-float', 'audit-float', 'stats-float'].some(function (o) {
+        return document.getElementById(o).classList.contains('visible');
+    });
+    document.body.classList.toggle('sheet-open', anyOpen);
 }
 
 function closePanel() {
@@ -1080,6 +1095,18 @@ function init() {
         map.invalidateSize(false);
         if (kbase) kbase.relayout();
     });
+
+    /* 화면 회전·크기 변경 — 라벨 크기와 겹침을 다시 계산 */
+    window.addEventListener('resize', function () {
+        syncLabelMetrics();
+        map.invalidateSize(false);
+        if (kbase) kbase.relayout();
+        renderLabels();
+    });
+
+    /* 홈 화면 바로가기(manifest shortcuts)로 들어온 경우 해당 패널을 연다 */
+    var panel = new URLSearchParams(location.search).get('panel');
+    if (panel === 'audit' || panel === 'stats') show(panel + '-float', true);
 
     wireGeo();
     geoSummary();

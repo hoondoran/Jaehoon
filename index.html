@@ -2,8 +2,19 @@
 <html lang="ko">
 <head>
     <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, viewport-fit=cover">
     <title>공시지가 산정 — 표준지 GIS</title>
+
+    <!-- PWA (갤럭시 홈 화면 설치 · 오프라인) -->
+    <link rel="manifest" href="manifest.webmanifest">
+    <meta name="theme-color" content="#0d366b">
+    <meta name="mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="공시지가">
+    <link rel="icon" href="icons/icon-192.png" sizes="192x192">
+    <link rel="apple-touch-icon" href="icons/icon-192.png">
+
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
     <link rel="stylesheet" href="css/style.css">
 </head>
@@ -145,5 +156,32 @@
 <script src="js/kakao_base.js"></script>
 <script src="js/geocode.js"></script>
 <script src="js/app.js"></script>
+
+<script>
+/* 서비스워커 등록 — 오프라인 지원. file:// 로 열면 등록되지 않는다(정상). */
+if ('serviceWorker' in navigator && location.protocol.indexOf('http') === 0) {
+    window.addEventListener('load', function () {
+        navigator.serviceWorker.register('sw.js').then(function (reg) {
+            // 새 버전이 준비되면 즉시 교체하고 한 번만 새로고침
+            reg.addEventListener('updatefound', function () {
+                var sw = reg.installing;
+                if (!sw) return;
+                sw.addEventListener('statechange', function () {
+                    if (sw.state === 'installed' && navigator.serviceWorker.controller) {
+                        sw.postMessage({ type: 'SKIP_WAITING' });
+                    }
+                });
+            });
+        }).catch(function (e) { console.warn('서비스워커 등록 실패:', e); });
+
+        var reloaded = false;
+        navigator.serviceWorker.addEventListener('controllerchange', function () {
+            if (reloaded) return;
+            reloaded = true;
+            location.reload();
+        });
+    });
+}
+</script>
 </body>
 </html>

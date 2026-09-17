@@ -1,0 +1,77 @@
+name: APK 빌드
+
+# 이 저장소의 안드로이드 래퍼(android/)를 APK 로 빌드한다.
+# 개발 PC 에 JDK·Android SDK 를 설치하지 않아도 되도록 전부 CI 에서 처리한다.
+#
+#   · 수동 실행    : Actions 탭 → "APK 빌드" → Run workflow
+#   · 결과물 받기  : 실행 결과 페이지 하단 Artifacts → gongsi-gis-apk
+#   · 태그(v1.0 등)를 밀면 Release 에 APK 가 첨부된다.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'android/**'
+      - '.github/workflows/android.yml'
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write        # 태그 빌드에서 Release 생성
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: JDK 17 설치
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Android SDK 설치
+        uses: android-actions/setup-android@v3
+
+      # gradle-wrapper.jar 를 저장소에 두지 않으려고 Gradle 을 직접 설치해 쓴다
+      # (AGP 8.5.2 는 Gradle 8.7 이상 필요)
+      - name: Gradle 설치
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.9'
+
+      - name: 디버그 APK 빌드
+        working-directory: android
+        run: gradle assembleDebug --no-daemon --stacktrace
+
+      - name: APK 이름 정리
+        id: apk
+        run: |
+          SRC=android/app/build/outputs/apk/debug/app-debug.apk
+          NAME="gongsi-gis-${GITHUB_REF_NAME//\//-}-${GITHUB_SHA::7}.apk"
+          cp "$SRC" "$NAME"
+          echo "name=$NAME" >> "$GITHUB_OUTPUT"
+          ls -lh "$NAME"
+
+      - name: APK 업로드
+        uses: actions/upload-artifact@v4
+        with:
+          name: gongsi-gis-apk
+          path: ${{ steps.apk.outputs.name }}
+          retention-days: 90
+
+      - name: Release 에 첨부 (태그일 때만)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: ${{ steps.apk.outputs.name }}
+          body: |
+            공시지가 산정 GIS 안드로이드 앱
+
+            갤럭시 등 안드로이드 기기에 설치해 쓰는 래퍼 앱입니다.
+            설치: APK 를 내려받아 실행 → "출처를 알 수 없는 앱" 설치를 허용.
+
+            디버그 서명 APK 이므로 Play 스토어 배포용이 아닙니다(사내 사이드로드용).
