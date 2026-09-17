@@ -143,6 +143,7 @@ A조·B조 중 한쪽만 평가한 **단수조**는 358필지이며, 해당 조 
 index.html                 화면 구조
 css/style.css              스타일 · 색상 토큰
 js/appraise.js             산정/검증 도메인 로직 (DOM 비의존, 단위 테스트 가능)
+js/kakao_base.js           카카오 배경지도 + Leaflet 동기화
 js/geocode.js              지오코딩 · 좌표 캐시 · CSV 가져오기/내보내기
 js/app.js                  지도 · 필터 · 패널 · 렌더
 data/parcels.js            표준지 1,043필지 (자동 생성)
