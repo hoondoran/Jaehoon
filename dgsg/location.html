@@ -1,0 +1,107 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<!-- 용역 자료이므로 검색엔진 색인에서 제외한다 (주소를 아는 사람은 그대로 열람 가능) -->
+<meta name="robots" content="noindex, nofollow">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>동경상경빌딩 — 본건 입지도</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+<style>
+/* ============================================================
+   본건 입지도 — 보고서 삽입용 도면
+   위성(HYBRID) 배경에 대상지·역세권·도로를 표기한다.
+   ============================================================ */
+*{margin:0;padding:0;box-sizing:border-box}
+html,body{width:100%;height:100%;overflow:hidden;background:#222;
+    font-family:'Pretendard','Malgun Gothic',-apple-system,sans-serif}
+
+/* 도면 영역 — 캡처 비율을 보고서용으로 고정 */
+#frame{position:absolute;top:0;left:0;right:0;bottom:0;background:#000}
+#kakao-map,#map{position:absolute;inset:0}
+#kakao-map{z-index:0}
+#map{z-index:1;background:transparent}
+.leaflet-container{background:transparent;font-family:inherit}
+
+/* ----- 라벨 공통 ----- */
+.lbl{white-space:nowrap;font-weight:800;line-height:1.25;letter-spacing:-.3px;
+    text-shadow:0 0 3px #000,0 0 3px #000,0 0 5px #000,1px 1px 2px #000}
+.lbl.site{color:#ff2d2d;font-size:17px;text-shadow:0 0 3px #fff,0 0 4px #fff,0 0 7px #fff}
+.lbl.station{color:#fff;font-size:14px}
+.lbl.road{color:#fff;font-size:13px}
+.lbl.poi{color:#fff;font-size:11px;font-weight:700;opacity:.95}
+.lbl.radius{color:#fff;font-size:11.5px;font-weight:700;opacity:.95}
+.leaflet-marker-icon.plain{background:transparent;border:none}
+
+/* 역 뱃지 */
+.st-badge{display:flex;align-items:center;gap:4px;white-space:nowrap}
+.st-badge i{width:17px;height:17px;border-radius:50%;color:#fff;font-size:11px;font-weight:800;
+    display:flex;align-items:center;justify-content:center;font-style:normal;
+    box-shadow:0 0 0 1.5px rgba(255,255,255,.9)}
+.st-badge span{color:#fff;font-size:13.5px;font-weight:800;
+    text-shadow:0 0 3px #000,0 0 3px #000,0 0 5px #000}
+/* 화면 오른쪽 라벨은 왼쪽으로 뒤집어 잘리지 않게 한다 */
+.st-badge.flip{flex-direction:row-reverse;transform:translateX(-100%)}
+.lbl.flip{transform:translateX(-100%)}
+
+/* ----- 제목 · 범례 ----- */
+#title{position:absolute;top:14px;left:14px;z-index:1300;color:#fff;
+    text-shadow:0 0 4px #000,0 0 8px #000}
+#title h1{font-size:19px;font-weight:800;letter-spacing:-.4px}
+#title p{font-size:12px;font-weight:600;opacity:.92;margin-top:2px}
+
+#legend{position:absolute;right:14px;bottom:14px;z-index:1300;
+    background:rgba(16,18,22,.84);border:1px solid rgba(255,255,255,.25);border-radius:8px;
+    padding:9px 11px;color:#fff;font-size:11px;line-height:1.6;min-width:150px}
+#legend b{display:block;font-size:11px;font-weight:800;margin-bottom:5px;letter-spacing:.3px}
+#legend .r{display:flex;align-items:center;gap:7px;margin-top:3px}
+#legend .k{width:14px;height:10px;border-radius:2px;flex:none}
+#legend .note{margin-top:7px;padding-top:6px;border-top:1px solid rgba(255,255,255,.2);
+    font-size:10px;opacity:.8;line-height:1.5}
+
+/* ----- 조작 바 (캡처 시 숨김) ----- */
+#bar{position:absolute;top:14px;right:14px;z-index:1400;display:flex;gap:5px}
+#bar button{background:rgba(255,255,255,.94);border:none;border-radius:7px;padding:7px 11px;
+    font-size:11.5px;font-weight:700;color:#1a202c;cursor:pointer;font-family:inherit}
+#bar button:hover{background:#fff}
+#bar button.on{background:#256abf;color:#fff}
+body.capture #bar{display:none}
+</style>
+</head>
+<body>
+
+<div id="frame">
+    <div id="kakao-map"></div>
+    <div id="map"></div>
+
+    <div id="title">
+        <h1>본건 입지도</h1>
+        <p>서울특별시 강남구 역삼동 824-19, 20, 21 (테헤란로 116)</p>
+    </div>
+
+    <div id="bar">
+        <button id="b-type">위성 / 일반</button>
+        <button id="b-radius" class="on">반경</button>
+        <button id="b-poi" class="on">주변 빌딩</button>
+        <button id="b-cap">캡처 모드</button>
+    </div>
+
+    <div id="legend">
+        <b>범례</b>
+        <div class="r"><span class="k" style="background:#ff2d2d;opacity:.55;border:2px solid #ff2d2d"></span>대상지</div>
+        <div class="r"><span class="k" style="background:#00a84d"></span>지하철 2호선</div>
+        <div class="r"><span class="k" style="background:#d31145"></span>신분당선</div>
+        <div class="r"><span class="k" style="background:#bdbdbd"></span>9호선</div>
+        <div class="r"><span class="k" style="background:transparent;border:2px dashed #fff"></span>강남역 반경</div>
+        <div class="note" id="lg-note"></div>
+    </div>
+</div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=9185cfe0d3dcbd94326f64f4338462f1&libraries=services&autoload=false"></script>
+<script src="data/cases.js"></script>
+<script src="data/coords.js"></script>
+<script src="js/kakao_base.js"></script>
+<script src="js/location.js"></script>
+</body>
+</html>

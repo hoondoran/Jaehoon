@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="utf-8">
+    <!-- 용역 자료이므로 검색엔진 색인에서 제외한다 (주소를 아는 사람은 그대로 열람 가능) -->
+    <meta name="robots" content="noindex, nofollow">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>동경상경빌딩 — 평가자료 지도</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css">
+    <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+
+<div id="side-panel">
+    <div class="panel-header">
+        <h1>동경상경빌딩</h1>
+        <div class="subtitle" id="hdr-sub">서울 강남구 역삼동 824-19 · 824-20 · 824-21</div>
+        <div class="mode-tabs">
+            <button data-mode="before" class="on">종전</button>
+            <button data-mode="after">종후</button>
+            <button data-mode="locmap">위치도</button>
+            <button data-mode="landmap">토지</button>
+        </div>
+        <div class="hdr-value" id="hdr-value"></div>
+        <div class="sync-status" id="geo-status">좌표 확인 중…</div>
+        <div class="geo-bar">
+            <button id="btn-geo">📍 좌표 변환</button>
+            <button id="btn-save">⬇ coords 저장</button>
+        </div>
+    </div>
+
+    <div class="filter-section">
+        <label>표시 레이어</label>
+        <div class="filter-row" id="f-layer"></div>
+        <label class="mini-label">지도 색상 기준</label>
+        <select class="sel" id="f-metric"></select>
+        <label class="toggle-row"><input type="checkbox" id="f-label" checked> 요약 라벨 표시</label>
+        <label class="toggle-row"><input type="checkbox" id="f-radius"> 본건 반경 500m 표시</label>
+    </div>
+
+    <div id="list-container"></div>
+</div>
+
+<div id="kakao-map"></div>
+<div id="map"></div>
+
+<div id="basemap-ctl">
+    <button data-type="ROADMAP" class="on">일반</button>
+    <button data-type="SKYVIEW">위성</button>
+    <button data-type="HYBRID">하이브리드</button>
+    <button id="btn-district" title="용도지역 지적편집도">지적</button>
+</div>
+
+<div id="toolbar">
+    <button id="btn-detail">📋 상세</button>
+    <button id="btn-compare">⚖ 비교</button>
+    <button id="btn-reset-labels" style="display:none">↺ 라벨 자동배치</button>
+</div>
+
+<div id="legend">
+    <div class="lg-title" id="lg-title">구분</div>
+    <div id="lg-rows"></div>
+    <div class="lg-note" id="lg-note"></div>
+</div>
+
+<div class="float" id="detail-float">
+    <div class="fl-head"><span>📋 상세</span><button data-close="detail-float">×</button></div>
+    <div class="fl-body" id="detail-body">
+        <div class="empty">지도의 마커 또는 좌측 목록에서 선택하세요.</div>
+    </div>
+</div>
+
+<div class="float" id="compare-float">
+    <div class="fl-head"><span>⚖ 본건 대비 비교</span><button data-close="compare-float">×</button></div>
+    <div class="fl-body" id="compare-body"></div>
+</div>
+
+<div id="panel-overlay"></div>
+<button id="mobile-toggle">📋 목록</button>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://dapi.kakao.com/v2/maps/sdk.js?appkey=9185cfe0d3dcbd94326f64f4338462f1&libraries=services&autoload=false"></script>
+
+<script src="data/cases.js"></script>
+<script src="data/coords.js"></script>
+<script src="js/kakao_base.js"></script>
+<script src="js/app.js"></script>
+</body>
+</html>
