@@ -356,3 +356,16 @@ textarea.memo:focus{border-color:var(--brand-500)}
     .float{max-height:92vh}
     .float .fl-body{max-height:calc(92vh - 46px)}
 }
+
+/* ===== 리별 평균가격 라벨 =====
+   24개뿐이라 전부 띄운다. 필지 라벨 위에 오도록 z-index 를 높게 둔다. */
+.leaflet-marker-icon.ri-wrap{background:transparent;border:none}
+.ri-label{width:120px;background:rgba(255,255,255,.97);border:2px solid #2a78d6;
+    border-radius:7px;overflow:hidden;text-align:center;
+    box-shadow:0 2px 8px rgba(0,0,0,.3);pointer-events:none}
+.ri-label .ri-name{color:#fff;font-size:11px;font-weight:800;line-height:1.65;
+    letter-spacing:-.4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:0 4px}
+.ri-label .ri-val{font-size:14px;font-weight:800;color:#1a202c;line-height:1.4;
+    font-variant-numeric:tabular-nums}
+.ri-label .ri-n{font-size:9.5px;font-weight:600;color:#718096;line-height:1.35;
+    border-top:1px solid #e2e8f0}

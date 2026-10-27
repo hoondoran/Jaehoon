@@ -12,6 +12,30 @@ var fmtWon = A.fmtWon, fmtPct = A.fmtPct, fmtArea = A.fmtArea, fmtShort = A.fmtS
    ============================================================ */
 var REGION = window.PARCEL_REGION || '';
 var recs = A.buildRecords(window.PARCEL_FIELDS, window.PARCEL_ROWS);
+
+/* 「표준지 시가수준 입력_261026.xls」의 최신 시가수준을 주소로 매칭해 덮어쓴다.
+   원표의 '전년반영률' 열은 76건이 실제의 절반으로 기재돼 있어 쓰지 않고 C/D 로 재계산한다. */
+var mktStat = (function () {
+    var M = window.MARKET_LEVEL, hit = 0, miss = [], halved = 0;
+    if (!M) return null;
+    recs.forEach(function (r) {
+        var m = M[r.loc];
+        if (!m) { miss.push(r.loc); return; }
+        hit++;
+        r.pmkt = m[0];                       // 전년 시가수준 (D)
+        r.mkta = m[1]; r.mktb = m[2];        // 올해 A·B조
+        r.mkt  = m[1];                       // 지도 기준은 A조
+        r.prevGongsi = m[3];                 // 전년 공시지가 (C)
+        r.ratioSheet = m[4] * 100;           // 원표 반영률 (검증용)
+        r.ratioCalc  = m[0] > 0 ? m[3] / m[0] * 100 : null;   // 실제 C/D
+        r.ratioBad   = (r.ratioCalc && Math.abs(r.ratioCalc - r.ratioSheet) >= 10);
+        if (r.ratioBad) halved++;
+        r.mktChg = m[0] > 0 ? (m[1] / m[0] - 1) * 100 : null; // 시가수준 전년 대비
+        A.derive(r);
+    });
+    return { hit: hit, miss: miss, halved: halved };
+})();
+
 A.computeBalance(recs);
 
 var TH = { resid: 0.5, gap: 3, chg: 10, z: 2 };
@@ -19,69 +43,40 @@ A.applyAudit(recs, TH);
 
 var geoStat = window.Geo.hydrate(recs);
 
-/* 좌표가 확보된 필지에 현장조사 일차(1~10)와 그날의 방문 순서를 배정한다.
-   좌표가 바뀌면(지오코딩·CSV 가져오기) 다시 계산해야 한다. */
-var dayPlan = [];      // Route.plan 의 일차별 요약
 
-function replan() {
-    dayPlan = window.Route.plan(recs, PLAN_DAYS);
-    applyRoadRoutes();
-    return dayPlan;
-}
-
-/* data/roads.js 가 있으면 도로 기준 순서로 덮어쓴다.
-   직선 순서는 강·고속도로로 막힌 구간을 무시해 실제 주행이 크게 늘어난다. */
-function hasRoads() {
-    return !!(window.ROAD_ROUTES && Object.keys(window.ROAD_ROUTES).length);
-}
-
-function applyRoadRoutes() {
-    if (!hasRoads()) return;
-    var byPnu = {};
-    recs.forEach(function (r) { byPnu[r.pnu] = r; });
-
-    Object.keys(window.ROAD_ROUTES).forEach(function (dk) {
-        var info = window.ROAD_ROUTES[dk], day = Number(dk);
-        if (!info || !info.order) return;
-        info.order.forEach(function (pnu, i) {
-            var r = byPnu[pnu];
-            if (r) { r.day = day; r.seq = i + 1; }
-        });
-    });
-    rebuildDaySummary();
-}
-
-/* roads.js 는 일차 배정 자체를 담고 있어서(order 의 PNU 가 그 일차 소속)
-   직선 계획으로 만든 요약과 어긋날 수 있다. 실제 레코드에서 다시 만든다. */
-function rebuildDaySummary() {
+/* ---------- 리(里) 단위 집계 ----------
+   읍·면·리별 평균 가격을 라벨로 보여주기 위한 사전 계산.
+   좌표가 있는 필지만으로 중심점을 잡는다. */
+var riStats = (function () {
     var g = {};
     recs.forEach(function (r) {
-        if (!r.day) return;
-        (g[r.day] || (g[r.day] = [])).push(r);
+        var key = r.dong;                      // "화원읍 천내리"
+        if (!key) return;
+        (g[key] || (g[key] = [])).push(r);
     });
-    dayPlan = Object.keys(g).map(Number).sort(function (a, b) { return a - b; }).map(function (d) {
-        var list = g[d];
-        var prices = list.map(function (r) { return r.price; })
-                         .filter(function (p) { return p > 0; })
-                         .sort(function (a, b) { return a - b; });
-        var info = window.ROAD_ROUTES ? window.ROAD_ROUTES[String(d)] : null;
-        var prev = dayPlan.filter(function (x) { return x.day === d; })[0] || {};
+    return Object.keys(g).map(function (key) {
+        var list = g[key];
+        var pts = list.filter(function (r) { return r.lat; });
+        var price = list.map(function (r) { return r.price; }).filter(function (v) { return v > 0; });
+        var mkt   = list.map(function (r) { return r.mkt; }).filter(function (v) { return v > 0; });
+        price.sort(function (a, b) { return a - b; });
+        function avg(a) { return a.length ? a.reduce(function (s, v) { return s + v; }, 0) / a.length : 0; }
         return {
-            day: d,
+            name: key,
+            eup: key.split(' ')[0],
+            ri: key.split(' ')[1] || key,
             n: list.length,
-            km: prev.km || 0,                      // 직선 기준 (참고용)
-            roadMeters: info ? info.meters : undefined,
-            roadSeconds: info ? info.seconds : undefined,
-            roadKm: info ? info.meters / 1000 : undefined,
-            area: list.reduce(function (s, r) { return s + r.area; }, 0),
-            medianPrice: prices.length ? prices[Math.floor(prices.length / 2)] : 0,
-            lat: list.reduce(function (s, r) { return s + r.lat; }, 0) / list.length,
-            lng: list.reduce(function (s, r) { return s + r.lng; }, 0) / list.length
+            avgPrice: avg(price),
+            medPrice: price.length ? price[Math.floor(price.length / 2)] : 0,
+            minPrice: price.length ? price[0] : 0,
+            maxPrice: price.length ? price[price.length - 1] : 0,
+            avgMkt: avg(mkt),
+            lat: pts.length ? avg(pts.map(function (r) { return r.lat; })) : null,
+            lng: pts.length ? avg(pts.map(function (r) { return r.lng; })) : null
         };
-    });
-}
-
-replan();
+    }).filter(function (s) { return s.lat !== null; })
+      .sort(function (a, b) { return b.avgPrice - a.avgPrice; });
+})();
 
 /* 메모 (localStorage) */
 var MEMO_KEY = 'gongsi.memo.v1';
@@ -103,14 +98,6 @@ var SEQ = ['#9ec5f4', '#5598e7', '#2a78d6', '#1c5cab', '#104281'];
 var DIV = ['#1c5cab', '#6da7ec', '#cbd5e0', '#e87b7b', '#b32a2a'];
 var NO_VAL = '#cbd5e0';
 
-/* 조사 일차는 범주가 아니라 순서가 있는 값(1→10)이므로 단일 blue 램프를
-   연한 쪽에서 진한 쪽으로 10단계 쓴다. 지도 위에서 가장 연한 칸도 보이도록
-   ordinal 규칙대로 250 단계부터 시작한다. 일차 자체는 라벨에 글자로도
-   찍히므로 색만으로 구분하지 않는다. */
-var DAY_COLORS = ['#86b6ef', '#6da7ec', '#5598e7', '#3987e5', '#2a78d6',
-                  '#256abf', '#1c5cab', '#184f95', '#104281', '#0d366b'];
-var PLAN_DAYS = 10;
-
 var METRICS = {
     price: { label: '공시지가 (원/㎡)', type: 'seq', unit: '원',
              get: function (r) { return r.price; }, fmt: function (v) { return fmtShort(v); } },
@@ -126,8 +113,12 @@ var METRICS = {
              get: function (r) { return r.calcPrice > 0 ? r.residPct : null; }, fmt: function (v) { return v.toFixed(3) + '%'; } },
     zdev:  { label: '균형성 편차 (σ)', type: 'div',
              get: function (r) { return r.zdev || null; }, fmt: function (v) { return v.toFixed(2) + 'σ'; } },
-    day:   { label: '현장조사 일차', type: 'ord',
-             get: function (r) { return r.day || null; }, fmt: function (v) { return v + '일차'; } }
+    mktchg: { label: '시가수준 전년 대비 (%)', type: 'div',
+             get: function (r) { return (r.mktChg === undefined) ? null : r.mktChg; },
+             fmt: function (v) { return v.toFixed(2) + '%'; } },
+    rcalc: { label: '전년 반영률 C/D (%)', type: 'seq',
+             get: function (r) { return r.ratioCalc || null; },
+             fmt: function (v) { return v.toFixed(1) + '%'; } }
 };
 
 var scale = { breaks: [], colors: SEQ, type: 'seq' };
@@ -141,12 +132,7 @@ function buildScale(list, metric) {
     vals.sort(function (a, b) { return a - b; });
     if (!vals.length) { scale = { breaks: [], colors: SEQ, type: m.type, metric: metric }; return; }
 
-    if (m.type === 'ord') {
-        // 1~10 고정 구간 — 분위가 아니라 값 자체가 등급이다
-        var br = [];
-        for (i = 1; i < PLAN_DAYS; i++) br.push(i + 0.5);
-        scale = { type: 'ord', metric: metric, colors: DAY_COLORS, breaks: br, lo: 1, hi: PLAN_DAYS };
-    } else if (m.type === 'seq') {
+    if (m.type === 'seq') {
         scale = {
             type: 'seq', metric: metric, colors: SEQ,
             breaks: [A.quantile(vals, .2), A.quantile(vals, .4), A.quantile(vals, .6), A.quantile(vals, .8)],
@@ -197,7 +183,7 @@ var map = L.map('map', {
 
 var kbase = null;   // 카카오 배경지도 컨트롤러 (KakaoBase.init 결과)
 
-var routeLayer = L.layerGroup().addTo(map);   // 일차 동선 (마커 아래)
+var riLayer = L.layerGroup().addTo(map);     // 리별 평균가격 라벨
 var markerLayer = L.layerGroup().addTo(map);
 var labelLayer = L.layerGroup().addTo(map);
 var heatLayer = null, heatOn = false;
@@ -206,9 +192,9 @@ var heatLayer = null, heatOn = false;
    4. 상태
    ============================================================ */
 var state = {
-    eup: new Set(), use: new Set(), day: new Set(), jimok: '', zone: '',
+    eup: new Set(), use: new Set(), jimok: '', zone: '',
     q: '', flaggedOnly: false, noGeoOnly: false,
-    metric: 'price', showLabel: true, listCap: 200
+    metric: 'price', showLabel: true, showRiAvg: false, listCap: 200
 };
 var selected = null;
 var filtered = [];
@@ -233,7 +219,6 @@ function applyFilter() {
     filtered = recs.filter(function (r) {
         if (state.eup.size && !state.eup.has(eupOf(r))) return false;
         if (state.use.size && !state.use.has(r.use || '미상')) return false;
-        if (state.day.size && !state.day.has(String(r.day))) return false;
         if (state.jimok && r.jimok !== state.jimok) return false;
         if (state.zone && r.zone1 !== state.zone) return false;
         if (state.flaggedOnly && !r.flagged) return false;
@@ -272,43 +257,8 @@ function renderMarkers() {
 
     renderLabels(withGeo);
     renderShape();
-    renderRoute();
+
     if (heatOn) renderHeat();
-}
-
-/* ---------- 일차 동선 ----------
-   일차를 하나만 골랐을 때 그날의 방문 순서를 선으로 잇는다.
-   여러 날을 한꺼번에 그리면 선이 엉켜 읽을 수 없으므로 단일 선택일 때만. */
-function renderRoute() {
-    routeLayer.clearLayers();
-    if (state.day.size !== 1) return;
-    // Set 은 유사배열이 아니라 slice.call 로는 못 꺼낸다
-    var day = Number(Array.from(state.day)[0]);
-    if (!day) return;
-    var path = window.Route.pathOf(recs, day);
-    if (path.length < 2) return;
-
-    var c = DAY_COLORS[Math.min(day, PLAN_DAYS) - 1];
-
-    /* 도로 형상이 있으면 실제 주행 경로를, 없으면 필지를 직선으로 잇는다.
-       직선은 어디까지나 순서 표시용이라는 걸 점선으로 드러낸다. */
-    var info = hasRoads() ? window.ROAD_ROUTES[String(day)] : null;
-    var line = (info && info.geometry) ? window.RoadPlan.decodePolyline(info.geometry) : path;
-    var dashed = !(info && info.geometry);
-
-    // 흰 테두리를 깔아 배경지도 위에서도 선이 끊겨 보이지 않게 한다
-    routeLayer.addLayer(L.polyline(line, { color: '#fff', weight: 7, opacity: .85 }));
-    routeLayer.addLayer(L.polyline(line, {
-        color: c, weight: 3.5, opacity: .95,
-        dashArray: dashed ? '6,6' : null
-    }));
-
-    // 출발 지점 표시
-    routeLayer.addLayer(L.marker(path[0], {
-        icon: L.divIcon({ className: 'pin-wrap', html: '<div class="route-start">출발</div>',
-                          iconSize: [40, 20], iconAnchor: [20, 30] }),
-        interactive: false
-    }));
 }
 
 /* ---------- 요약 라벨 ----------
@@ -335,11 +285,9 @@ function labelHtml(r, isSel) {
         var ic = r.auditLevel === 'critical' ? '⛔' : (r.auditLevel === 'serious' ? '🔺' : '⚠');
         flag = '<span class="sl-flag ' + r.auditLevel + '">' + ic + '</span>';
     }
-    // 머리줄: 조사 일차와 그날 방문 순서 (색이 아니라 글자로 식별되게)
-    var dayCol = r.day ? DAY_COLORS[Math.min(r.day, PLAN_DAYS) - 1] : '#a0aec0';
-    var head = '<div class="sl-day" style="background:' + dayCol + ';">'
-             + (r.day ? r.day + '일차 · ' + r.seq + '번' : '일차 미배정')
-             + flag + '</div>';
+    // 머리줄: 읍·면·리 (색이 아니라 글자로 식별되게)
+    var head = '<div class="sl-day" style="background:#5a6b7f;">'
+             + esc(r.dong || '') + flag + '</div>';
 
     return '<div class="sum-label' + (isSel ? ' sel' : '') + '" style="border-left-color:' + c + ';">'
         + head
@@ -493,10 +441,7 @@ function renderList() {
             var ic = r.auditLevel === 'critical' ? '⛔' : (r.auditLevel === 'serious' ? '🔺' : '⚠');
             flag = '<span class="flagdot ' + r.auditLevel + '">' + ic + ' 검수 ' + r.flags.length + '</span>';
         }
-        var dayBadge = r.day
-            ? '<span class="day-badge" style="background:' + DAY_COLORS[Math.min(r.day, PLAN_DAYS) - 1]
-              + '">' + r.day + '일차 ' + r.seq + '번</span>'
-            : '';
+        var dayBadge = '';
         return '<div class="list-item' + (selected && selected.key === r.key ? ' sel' : '') + '" data-k="' + r.key + '">'
             + '<div class="li-top"><span class="name">' + dayBadge + esc(r.loc) + '</span>'
             + '<span class="price">' + fmtWon(r.price) + '</span></div>'
@@ -531,17 +476,6 @@ function renderLegend() {
         return '<div class="lg-row"><span class="lg-sw" style="background:' + col + '"></span>'
              + '<span class="lg-lab">' + lab + '</span></div>';
     }
-    if (scale.type === 'ord') {
-        // 10칸은 세로로 늘어놓으면 범례가 너무 길다 — 가로 띠 + 양끝만 표기
-        var strip = c.map(function (col, i) {
-            return '<i title="' + (i + 1) + '일차" style="background:' + col + '"></i>';
-        }).join('');
-        document.getElementById('lg-rows').innerHTML =
-            '<div class="lg-strip">' + strip + '</div>'
-            + '<div class="lg-strip-ax"><span>1일차</span><span>' + PLAN_DAYS + '일차</span></div>';
-        document.getElementById('lg-note').textContent = '일차는 라벨에도 글자로 표시됩니다';
-        return;
-    }
 
     if (!b.length) {
         rows.push(sw(NO_VAL, '값 없음'));
@@ -566,10 +500,57 @@ function renderCounts() {
 function renderAll() {
     renderCounts();
     renderMarkers();
+    renderRiAvg();
     renderList();
     renderLegend();
     renderStats();
     renderAudit();
+}
+
+/* ---------- 리별 평균가격 라벨 ----------
+   필지 라벨과 달리 24개뿐이라 전부 띄운다. 현재 필터에 걸린 필지만으로
+   다시 집계하므로, 읍·지목 등을 좁히면 그 조건의 리별 평균이 보인다. */
+function renderRiAvg() {
+    riLayer.clearLayers();
+    if (!state.showRiAvg) return;
+
+    var g = {};
+    filtered.forEach(function (r) {
+        if (!r.lat || !(r.price > 0)) return;
+        (g[r.dong] || (g[r.dong] = [])).push(r);
+    });
+
+    var list = Object.keys(g).map(function (k) {
+        var a = g[k], n = a.length;
+        return {
+            name: k,
+            n: n,
+            avg: a.reduce(function (s, r) { return s + r.price; }, 0) / n,
+            lat: a.reduce(function (s, r) { return s + r.lat; }, 0) / n,
+            lng: a.reduce(function (s, r) { return s + r.lng; }, 0) / n
+        };
+    });
+    if (!list.length) return;
+
+    // 평균값 자체를 5단계 색으로 — 리 간 서열이 한눈에 보이게 한다
+    var vals = list.map(function (d) { return d.avg; }).sort(function (a, b) { return a - b; });
+    function band(v) {
+        var q = [0.2, 0.4, 0.6, 0.8].map(function (p) { return vals[Math.floor(vals.length * p)]; });
+        for (var i = 0; i < q.length; i++) if (v < q[i]) return SEQ[i];
+        return SEQ[4];
+    }
+
+    list.forEach(function (d) {
+        var col = band(d.avg);
+        var html = '<div class="ri-label" style="border-color:' + col + '">'
+                 + '<div class="ri-name" style="background:' + col + '">' + esc(d.name) + '</div>'
+                 + '<div class="ri-val">' + fmtWon(d.avg) + '</div>'
+                 + '<div class="ri-n">' + d.n + '필지 평균</div></div>';
+        riLayer.addLayer(L.marker([d.lat, d.lng], {
+            icon: L.divIcon({ className: 'ri-wrap', html: html, iconSize: [120, 54], iconAnchor: [60, 27] }),
+            interactive: false, keyboard: false, zIndexOffset: 1200
+        }));
+    });
 }
 
 /* ============================================================
@@ -612,9 +593,6 @@ function renderCalc() {
        + '<br>PNU ' + esc(r.pnu) + (r.lat ? '' : ' · <b style="color:#b8552a">좌표 미확보</b>') + '</div>';
 
     h += '<dl class="kv">'
-       + (r.day ? dl('현장조사', '<span class="day-badge" style="background:'
-            + DAY_COLORS[Math.min(r.day, PLAN_DAYS) - 1] + '">' + r.day + '일차</span>'
-            + ' 그날 ' + r.seq + '번째 방문') : '')
        + dl('지목 / 면적', esc(r.jimok) + ' · ' + fmtArea(r.area))
        + dl('용도지역', esc(r.zone1 || '-') + (r.zone2 ? ' · ' + esc(r.zone2) : ''))
        + dl('이용상황', esc(r.use || '-'))
@@ -874,61 +852,10 @@ function renderStats() {
     });
     h += '</tbody></table></div>';
 
-    /* 일차별 조사 계획 */
-    if (dayPlan.length) {
-        var road = hasRoads();
-        var totKm = dayPlan.reduce(function (s, d) {
-            return s + (road && d.roadKm ? d.roadKm : d.km);
-        }, 0);
-        var totMin = dayPlan.reduce(function (s, d) { return s + (d.roadSeconds || 0); }, 0) / 60;
-
-        h += '<div class="sec"><div class="sec-h">현장조사 일차별 계획 '
-           + '<span style="color:var(--ink-4);font-weight:600">'
-           + (road ? '도로' : '직선') + ' 합계 ' + totKm.toFixed(0) + 'km'
-           + (totMin ? ' · 주행 ' + Math.round(totMin) + '분' : '') + '</span></div>'
-           + '<table class="cmp"><thead><tr><th>일차</th><th>필지</th>'
-           + '<th>' + (road ? '주행거리' : '직선거리') + '</th>'
-           + (road ? '<th>주행시간</th>' : '<th>중위지가</th>')
-           + '<th>면적</th></tr></thead><tbody>';
-        dayPlan.forEach(function (d) {
-            var col = DAY_COLORS[Math.min(d.day, PLAN_DAYS) - 1];
-            var km = (road && d.roadKm) ? d.roadKm : d.km;
-            h += '<tr data-day="' + d.day + '"><td>'
-               + '<i style="display:inline-block;width:9px;height:9px;border-radius:50%;'
-               + 'background:' + col + ';margin-right:5px;"></i>' + d.day + '일차</td>'
-               + '<td>' + d.n + '</td><td>' + km.toFixed(1) + 'km</td>'
-               + (road
-                    ? '<td>' + (d.roadSeconds ? Math.round(d.roadSeconds / 60) + '분' : '-') + '</td>'
-                    : '<td>' + fmtShort(d.medianPrice) + '</td>')
-               + '<td>' + fmtShort(d.area) + '㎡</td></tr>';
-        });
-        h += '</tbody></table>'
-           + '<div class="hint">행을 누르면 그 일차만 지도에 표시하고 동선을 그립니다. '
-           + (road
-                ? '실제 도로를 따라 계산한 차량 주행거리이며, 주행시간에 조사 시간은 빠져 있습니다.'
-                : '아직 <b>직선거리</b>입니다 — [🚗 도로 경로 계산]을 돌리면 도로 기준으로 바뀝니다.')
-           + '</div></div>';
-    }
 
     h += '<div class="btn-line"><button id="btn-csv" class="primary">⬇ 현재 필터 CSV 내보내기</button></div>';
     el.innerHTML = h;
     document.getElementById('btn-csv').onclick = function () { exportCsv(filtered, '공시지가_필터'); };
-    el.querySelectorAll('tr[data-day]').forEach(function (n) {
-        n.onclick = function () {
-            var d = n.dataset.day;
-            state.day.clear(); state.day.add(d);
-            state.metric = 'day';
-            document.getElementById('f-metric').value = 'day';
-            document.querySelectorAll('#f-day .chip').forEach(function (c) {
-                c.classList.toggle('active', c.dataset.v === d);
-            });
-            state.listCap = 200;
-            applyFilter();
-            var pts = recs.filter(function (r) { return String(r.day) === d && r.lat; })
-                          .map(function (r) { return [r.lat, r.lng]; });
-            if (pts.length) map.fitBounds(pts, { padding: [50, 50] });
-        };
-    });
 }
 
 /* ============================================================
@@ -961,8 +888,6 @@ function renderAudit() {
    ============================================================ */
 function exportCsv(list, name) {
     var cols = [
-        ['조사일차', function (r) { return r.day || ''; }],
-        ['방문순서', function (r) { return r.seq || ''; }],
         ['소재지', function (r) { return r.loc; }],
         ['PNU', function (r) { return r.pnu; }],
         ['도로명주소', function (r) { return r.road; }],
@@ -1040,8 +965,8 @@ function wireGeo() {
             },
             onDone: function (s) {
                 bRun.disabled = false; bStop.disabled = true; prog.classList.remove('on');
-                replan();                 // 좌표가 늘었으니 일차·동선을 다시 짠다
-                renderDayChips();
+
+
                 applyFilter();
                 geoSummary();
                 if (s.ok) {
@@ -1068,8 +993,8 @@ function wireGeo() {
         fr.onload = function () {
             var res = window.Geo.importCsv(String(fr.result), recs);
             file.value = '';
-            replan();
-            renderDayChips();
+
+
             applyFilter();
             if (res.matched) {
                 setStatus('ok', '✓ CSV에서 ' + res.matched.toLocaleString('ko-KR') + '건 좌표 적용'
@@ -1171,44 +1096,6 @@ function chipRow(containerId, items, setRef) {
     });
 }
 
-/* ---------- 일차 칩 ---------- */
-
-function renderDayChips() {
-    var el = document.getElementById('f-day');
-    if (!dayPlan.length) {
-        el.innerHTML = '<span class="hint" style="margin:0">좌표가 있어야 일차를 배정합니다.</span>';
-        document.getElementById('day-hint').textContent = '';
-        return;
-    }
-    var road = hasRoads();
-    var totalKm = dayPlan.reduce(function (s, d) {
-        return s + (road && d.roadKm ? d.roadKm : d.km);
-    }, 0);
-    document.getElementById('day-hint').textContent =
-        '· ' + dayPlan.length + '일 · ' + (road ? '도로' : '직선') + ' 합계 '
-        + totalKm.toFixed(0) + 'km';
-
-    el.innerHTML = dayPlan.map(function (d) {
-        var col = DAY_COLORS[Math.min(d.day, PLAN_DAYS) - 1];
-        var km = (road && d.roadKm) ? d.roadKm : d.km;
-        var tip = d.n + '필지 · ' + (road && d.roadKm ? '도로 ' : '직선 ') + km.toFixed(1) + 'km'
-                + (d.roadSeconds ? ' · 주행 ' + Math.round(d.roadSeconds / 60) + '분' : '');
-        return '<span class="chip day-chip" data-v="' + d.day + '" '
-            + 'title="' + tip + '" '
-            + 'style="--day-col:' + col + '">'
-            + '<i class="dot"></i>' + d.day + '일차<span class="cnt">' + d.n + '</span></span>';
-    }).join('');
-
-    el.querySelectorAll('.chip').forEach(function (n) {
-        n.onclick = function () {
-            var v = n.dataset.v;
-            if (state.day.has(v)) { state.day.delete(v); n.classList.remove('active'); }
-            else { state.day.add(v); n.classList.add('active'); }
-            state.listCap = 200;
-            applyFilter();
-        };
-    });
-}
 
 function fillSelect(id, items, placeholder) {
     var el = document.getElementById(id);
@@ -1280,7 +1167,7 @@ function init() {
     recs.forEach(function (r) { var k = eupOf(r); eupMap[k] = (eupMap[k] || 0) + 1; });
     chipRow('f-eup', Object.keys(eupMap).sort().map(function (k) { return { v: k, n: eupMap[k] }; }), state.eup);
     chipRow('f-use', uniq('use').slice(0, 12), state.use);
-    renderDayChips();
+
     fillSelect('f-jimok', uniq('jimok'), '지목 전체');
     fillSelect('f-zone', uniq('zone1'), '용도지역 전체');
 
@@ -1288,6 +1175,7 @@ function init() {
     document.getElementById('f-zone').onchange = function () { state.zone = this.value; state.listCap = 200; applyFilter(); };
     document.getElementById('f-metric').onchange = function () { state.metric = this.value; applyFilter(); };
     document.getElementById('f-label').onchange = function () { state.showLabel = this.checked; renderMarkers(); };
+    document.getElementById('f-riavg').onchange = function () { state.showRiAvg = this.checked; renderRiAvg(); };
     document.getElementById('f-flagged').onchange = function () { state.flaggedOnly = this.checked; state.listCap = 200; applyFilter(); };
     document.getElementById('f-nogeo').onchange = function () { state.noGeoOnly = this.checked; state.listCap = 200; applyFilter(); };
 
@@ -1297,73 +1185,6 @@ function init() {
         qt = setTimeout(function () { state.q = qi.value; state.listCap = 200; applyFilter(); }, 180);
     };
 
-    /* 일차 계획 */
-    document.getElementById('btn-day-plan').onclick = function () {
-        replan();
-        renderDayChips();
-        state.day.clear();
-        applyFilter();
-        show('stats-float', true);
-    };
-    /* 도로 기준 재계산 — OSRM 으로 거리행렬·경로 형상을 받아 data/roads.js 에 저장.
-       한 번 돌려 저장해 두면 앱은 그 파일만 읽으므로 오프라인에서도 동작한다. */
-    document.getElementById('btn-road-plan').onclick = function () {
-        var btn = this;
-        if (btn.disabled) return;
-        btn.disabled = true;
-        var prog = document.getElementById('geo-progress');
-        var bar = prog.querySelector('i');
-        prog.classList.add('on');
-        setStatus('pending', '🚗 도로 경로 계산 시작 (수 분 걸립니다)');
-
-        window.RoadPlan.planAllByRoad(recs, PLAN_DAYS, {
-            iters: 6,
-            onProgress: function (msg, done, total) {
-                bar.style.width = (100 * done / Math.max(total, 1)) + '%';
-                setStatus('pending', '🚗 ' + msg);
-            }
-        }).then(function (planObj) {
-            window.ROAD_ROUTES = planObj;
-            applyRoadRoutes();
-            renderDayChips();
-            applyFilter();
-
-            var text = window.RoadPlan.serialize(planObj);
-            return fetch('__save-data?f=roads.js', {
-                method: 'POST',
-                headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                body: text
-            }).then(function (r) {
-                if (!r.ok) throw new Error('HTTP ' + r.status);
-                return r.json();
-            }).then(function (j) {
-                setStatus('ok', '✓ data/roads.js 저장됨 (' + Math.round(j.bytes / 1024)
-                    + 'KB) — 커밋하면 배포본에 반영됩니다');
-            }).catch(function () {
-                // 정적 호스팅이면 저장 엔드포인트가 없다 → 파일로 내려받기
-                var blob = new Blob([text], { type: 'text/javascript;charset=utf-8' });
-                var a = document.createElement('a');
-                a.href = URL.createObjectURL(blob);
-                a.download = 'roads.js';
-                document.body.appendChild(a); a.click();
-                setTimeout(function () { URL.revokeObjectURL(a.href); a.remove(); }, 500);
-                setStatus('ok', '⬇ roads.js 내려받음 — data/ 폴더에 덮어쓰세요');
-            });
-        }).catch(function (err) {
-            setStatus('err', '⚠ 도로 경로 계산 실패: ' + err.message);
-        }).then(function () {
-            btn.disabled = false;
-            prog.classList.remove('on');
-        });
-    };
-
-    document.getElementById('btn-day-csv').onclick = function () {
-        // 조사 순서대로 정렬해 내보낸다
-        var list = recs.filter(function (r) { return r.day; }).sort(function (a, b) {
-            return a.day - b.day || a.seq - b.seq;
-        });
-        exportCsv(list, '현장조사_일차별_동선');
-    };
 
     /* 툴바 */
     document.getElementById('btn-calc').onclick = function () { show('calc-float'); };
